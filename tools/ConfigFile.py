@@ -13,11 +13,16 @@
 ###################################################################################################
 
 
+from __future__ import print_function
+#from builtins import str
+#from builtins import map
+#from builtins import range
+#from builtins import object
 import getopt
 import sys
 import os
 from string import Template
-import parser
+#import parser
 
 try               : from collections import OrderedDict
 except ImportError: from ordereddict import OrderedDict
@@ -37,7 +42,7 @@ class ConfigError(Exception):
 
 #========================================================================
 
-class Config:
+class Config(object):
 #----------------------------------------------------------------------
     def __init__(self, verif=None, nones=None, verbose=DFT_VERBOSE__, comment='#',
                  include='@', sameline='\\', variable='$', listsep=',', getall=False):
@@ -50,14 +55,14 @@ class Config:
     def nonevalues(self):
         if self.nones is None: return
         for v in self.nones:
-            for k in self.cfg.keys():
+            for k in list(self.cfg.keys()):
                 if self.cfg[k] is v: self.cfg[k] = None
 #----------------------------------------------------------------------
     def set(self, indict, path):
         dir, nam = os.path.split(path)
 
         try: f = open(path, "r")
-        except IOError, e: self.err("Unable to open file %s" % path)
+        except IOError as e: self.err("Unable to open file %s" % path)
 
         d = OrderedDict()
         l, ll = ("", "")
@@ -75,14 +80,14 @@ class Config:
                     else: d[name.strip()] = value.strip()
                 ll = ""
             f.close()
-        except IOError, e: self.err("Unable to read file %s" % path)
-        except StandardError, e: self.err("Error in file %s: %s" % (path, l))
+        except IOError as e: self.err("Unable to read file %s" % path)
+        except Exception as e: self.err("Error in file %s: %s" % (path, l))
 
         self.update(indict, d, "file %s" % path)
 #----------------------------------------------------------------------
     def evaluate(self, value, msg):
         try: return Template(value).substitute(self.vars).strip()
-        except KeyError, e: self.err("%s: Undefined variable used in %s" % (value, msg))
+        except KeyError as e: self.err("%s: Undefined variable used in %s" % (value, msg))
 #----------------------------------------------------------------------
     def typebool(self, value):
         if str(value).isdigit() : return int(value) != 0
@@ -95,27 +100,27 @@ class Config:
 #----------------------------------------------------------------------
     def addthiskey(self, k, value):
         val, values_str = None, value.split(self.listsep)
-        try   : val = map(int, values_str)
+        try   : val = list(map(int, values_str))
         except:
-            try   : val = map(float, values_str)
+            try   : val = list(map(float, values_str))
             except:
-                try   : val = map(lambda x:self.typebool(x), values_str)
+                try   : val = [self.typebool(x) for x in values_str]
                 except: val = None
         if val is None   : self.cfg[k] = value
         elif len(val) > 1: self.cfg[k] = val
         else             : self.cfg[k] = val[0]
 #----------------------------------------------------------------------
     def update(self, indict, dico, msg):
-        for k in dico.keys():
-            if not indict.has_key(k):
+        for k in list(dico.keys()):
+            if k not in indict:
                 if self.getall:
                     # First evaluate variables
                     dicoval = self.evaluate(dico[k].strip(), msg)
                     self.addthiskey(k, dicoval)
                 else: self.info("unused key %s in %s" % (k, msg))
-        for k in indict.keys():
+        for k in list(indict.keys()):
             dtype, st, default = indict[k]
-            if dico.has_key(k):
+            if k in dico:
                 # First evaluate variables
                 dicoval = self.evaluate(dico[k].strip(), msg)
                 # Then convert values with type
@@ -135,7 +140,7 @@ class Config:
                                 if i < len(self.cfg[k]): self.cfg[k][i] = val
                                 else: self.cfg[k].append(val)
                     else: self.cfg[k] = self.typevar(dicoval, dtype)
-                except ValueError, e: self.err("%s : Unable to convert %s to %s" % (k, dico[k], dtype))
+                except ValueError as e: self.err("%s : Unable to convert %s to %s" % (k, dico[k], dtype))
 #----------------------------------------------------------------------
     def fget(self, indict, path):
         self.reinit(indict)
@@ -146,7 +151,7 @@ class Config:
     def get(self, indict):
         self.reinit(indict)
         optstr = ""
-        for k in indict.keys(): optstr += indict[k][1]
+        for k in list(indict.keys()): optstr += indict[k][1]
         optlist, args = getopt.getopt(sys.argv[1:], optstr)
 
         # Parse command files if some
@@ -156,7 +161,7 @@ class Config:
         # Now parse command line
         dopt = OrderedDict()
         for opt in optlist:
-            for k in indict.keys():
+            for k in list(indict.keys()):
                 if len(indict[k][1]) == 0: continue
                 if opt[0][1] == indict[k][1][0]:
                     if opt[1] is '' and indict[k][0] == 'int': dopt[k] = '1'
@@ -172,12 +177,12 @@ class Config:
     def reinit(self, indict):
         self.cfg = OrderedDict()
         self.errors, self.errors = (False, False)
-        for k in indict.keys(): self.cfg[k] = indict[k][2]
+        for k in list(indict.keys()): self.cfg[k] = indict[k][2]
 #----------------------------------------------------------------------
     def validate(self):
 
         # Dictionnary local validation
-        for k in self.cfg.keys():
+        for k in list(self.cfg.keys()):
             if isinstance(self.cfg[k], list):
                 for kk in self.cfg[k]:
                     if kk is None:
@@ -215,23 +220,23 @@ class Config:
 #----------------------------------------------------------------------
     def view(self, indict):
         tmpcfg = self.get(indict)
-        for key, val in tmpcfg.items(): print key, '=', val
+        for key, val in list(tmpcfg.items()): print(key, '=', val)
 #----------------------------------------------------------------------
     def fview(self, indict, path):
         tmpcfg = self.fget(indict,path)
-        for key, val in tmpcfg.items(): print key, '=', val
+        for key, val in list(tmpcfg.items()): print(key, '=', val)
 #----------------------------------------------------------------------
     def display(self, prefix):
-        print "\n" + prefix + "Configuration:"
-        keys = self.cfg.keys()
+        print("\n" + prefix + "Configuration:")
+        keys = list(self.cfg.keys())
         keys.sort()
-        for k in keys: print prefix + "  " + k + " : ", self.cfg[k]
-        print ""
+        for k in keys: print(prefix + "  " + k + " : ", self.cfg[k])
+        print("")
 #----------------------------------------------------------------------
 def GetDefaultCfg(cfg, nones):
     d = OrderedDict()
     try:
-        for k in cfg.keys():
+        for k in list(cfg.keys()):
             t, o, v = cfg[k]
             if v in nones: v = None
             if v is None: d[k] = None

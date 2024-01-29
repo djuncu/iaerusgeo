@@ -1,6 +1,7 @@
-#!/usr/local/bin/python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+from __future__ import print_function
 from os import path
 from glob import glob
 
@@ -17,24 +18,24 @@ STEPS = [ 24, 3, 24]
 def PCF_SetFilesListOld(key, comment, dates, basedir, proddir, pattern, geocorrect=False, datedir=True, yeardir=True):
     if not isinstance(dates, list): dates = [dates]
     comment_lines = comment.split('\n')
-    print
-    for l in comment_lines: print '# ' + l
-    print key + ' = ',
+    print()
+    for l in comment_lines: print('# ' + l)
+    print(key + ' = ', end=' ')
     flist = []
     for dt in sorted(dates):
         rep = path.join(path.abspath(basedir), proddir)
         if yeardir: rep = path.join(rep, dt.strftime("%Y"))
         if datedir: rep = path.join(rep, dt.strftime("%Y_%m_%d"))
         for f in sorted(glob(path.join(rep, pattern.replace('<SLOT>', dt.strftime("%Y%m%d%H%M"))))): flist.append(f)
-    for f in flist: print "\\\n  " + f,    
-    print
+    for f in flist: print("\\\n  " + f, end=' ')    
+    print()
 
                     
 def PCF_SetFilesList(key, comment, dt_from, dt_to, basedir, proddir, pattern, freq, geocorrect=False, datedir=True, yeardir=True):
     comment_lines = comment.split('\n')
-    print
-    for l in comment_lines: print '# ' + l
-    print key + ' = ',
+    print()
+    for l in comment_lines: print('# ' + l)
+    print(key + ' = ', end=' ')
     flist = []
     dt = dt_from
     while dt <= dt_to:
@@ -44,8 +45,8 @@ def PCF_SetFilesList(key, comment, dt_from, dt_to, basedir, proddir, pattern, fr
         for f in glob(path.join(rep, pattern.replace('<SLOT>', IcareHdfFileNameUTC(dt)))): flist.append(f)
 #        dt += timedelta(minutes = slot_freq)
         dt += timedelta(minutes = freq)
-    for f in sorted(set(flist)): print "\\\n  " + f,    
-    print
+    for f in sorted(set(flist)): print("\\\n  " + f, end=' ')    
+    print()
 
                     
 def main():
@@ -77,6 +78,7 @@ def main():
         'INST_OUT'  : (int, 'I:',    0),
         'NSLOTS'    : (int, 'N:',    0),
         'ACCELERATE': (int, 'x:',    0),
+        'FLOTSAM_FLAG': (int, 'F:',    0),
         'VERBOSE'   : (int, 'V:',    1),        
         }
 
@@ -110,89 +112,93 @@ def main():
         step, priori_step = STEPS[cfg['TRIHOR']], STEPS[1 - cfg['HIST_DAY']]
 #    step, priori_step = STEPS[cfg['TRIHOR']], STEPS[1 - cfg['HIST_DAY']]
 
-    print '#####################################################'
-    print '# FICHIER DE COMMANDE POUR LE FRAMEWORK FMK_AERUSL3 #'
-    print '#####################################################'
-    print '# EXECUTION : python FMK_AerusL3.py <this file>     #'
-    print '#####################################################'
-    print '# - Date : %s' % IcareHdfFileNameUTC(title_dt)
-    print '#####################################################'
+    print('#####################################################')
+    print('# FICHIER DE COMMANDE POUR LE FRAMEWORK FMK_AERUSL3 #')
+    print('#####################################################')
+    print('# EXECUTION : python FMK_AerusL3.py <this file>     #')
+    print('#####################################################')
+    print('# - Date : %s' % IcareHdfFileNameUTC(title_dt))
+    print('#####################################################')
 
-    print
-    print '# Identificateur interne CGTD. Requis.'
-    print 'ICARE_ID = ' + cfg['ICARE_ID']
+    print()
+    print('# Identificateur interne CGTD. Requis.')
+    print('ICARE_ID = ' + cfg['ICARE_ID'])
 
-    print
-    print '# Version produit. Requis.'
-    print 'PROD_VER = ' + cfg['PROD_VER']
+    print()
+    print('# Version produit. Requis.')
+    print('PROD_VER = ' + cfg['PROD_VER'])
 
-    print
-    print '# Date de traitement. Requis.'
-    print 'DATE = ' + cfg['DATE']
+    print()
+    print('# Date de traitement. Requis.')
+    print('DATE = ' + cfg['DATE'])
 
-    print
-    print '# Niveau des affichage.'
-    print 'VERBOSE = %d' % cfg['VERBOSE']
+    print()
+    print('# Niveau des affichage.')
+    print('VERBOSE = %d' % cfg['VERBOSE'])
 
-    print
-    print '# Chemin du répertoire principal de la chaîne'
-    print 'MAINDIR = ' + cfg['MAINDIR']
+    print()
+    print('# Chemin du répertoire principal de la chaîne')
+    print('MAINDIR = ' + cfg['MAINDIR'])
 
-    print
-    print '# Chemin du répertoire de sortie'
-    print 'OUTDIR = ' + cfg['OUTDIR']
+    print()
+    print('# Chemin du répertoire de sortie')
+    print('OUTDIR = ' + cfg['OUTDIR'])
 
-    print
-    print '# Répertoire de travail temporaire. Facultatif. Valeur par défaut: "."'
-    print 'TMPDIR = ' + path.abspath(cfg['TMPDIR'])
+    print()
+    print('# Répertoire de travail temporaire. Facultatif. Valeur par défaut: "."')
+    print('TMPDIR = ' + path.abspath(cfg['TMPDIR']))
 
-    print
-    print '# Exécution en mode quasi temps réel ou non (0: non, 1: oui). Requis.'
-    print 'NRT = ', cfg['NRT']
+    print()
+    print('# Exécution en mode quasi temps réel ou non (0: non, 1: oui). Requis.')
+    print('NRT = ', cfg['NRT'])
 
-    print
-    print '# Région géostationnaire à traiter (MSG+0000 ou MSG+0415). Requis.'
-    print 'GEOREG = ', cfg['GEOREG']
+    print()
+    print('# Région géostationnaire à traiter (MSG+0000 ou MSG+0415). Requis.')
+    print('GEOREG = ', cfg['GEOREG'])
 
-    print
-    print '# Nom du fichier modèle de subsetting (recherché dans ancillary).'
-    print '# Facultatif. Valeur par défaut: "" (pas de subsetting)'
+    print()
+    print('# Nom du fichier modèle de subsetting (recherché dans ancillary).')
+    print('# Facultatif. Valeur par défaut: "" (pas de subsetting)')
     if cfg['SUBSET'] is None: cfg['SUBSET'] = ''
-    if cfg['SUBSET'] is not None: print 'SUBSET = ', cfg['SUBSET']
+    if cfg['SUBSET'] is not None: print('SUBSET = ', cfg['SUBSET'])
 
-    print
-    print '# Extension à ajouter en fin de nom de fichier (utile en cas de subsetting).'
-    print "# Facultatif. Valeur par défaut: '' (pas d'extension)"
+    print()
+    print('# Extension à ajouter en fin de nom de fichier (utile en cas de subsetting).')
+    print("# Facultatif. Valeur par défaut: '' (pas d'extension)")
     if cfg['EXTENSION'] is None: cfg['EXTENSION'] = ''
-    print 'EXTENSION = ', cfg['EXTENSION']
+    print('EXTENSION = ', cfg['EXTENSION'])
 
-    print
-    print '# Start?. Facultatif. Valeur par défaut: 0'
-    print 'START = %d' % cfg['START']
+    print()
+    print('# Start?. Facultatif. Valeur par défaut: 0')
+    print('START = %d' % cfg['START'])
 
-    print
-    print '# Mode de traitement (daily ou instantaneous). Facultatif. Valeur par défaut: 1 (daily).'
-    print 'DAILY_MODE = %d' % daily
+    print()
+    print('# Mode de traitement (daily ou instantaneous). Facultatif. Valeur par défaut: 1 (daily).')
+    print('DAILY_MODE = %d' % daily)
 
-    print
-    print '# Run tri-horaire (1) ou daily (0)?. Facultatif. Valeur par défaut: 0'
-    print 'TRIHOR = %d' % cfg['TRIHOR']
+    print()
+    print('# Run tri-horaire (1) ou daily (0)?. Facultatif. Valeur par défaut: 0')
+    print('TRIHOR = %d' % cfg['TRIHOR'])
 
-    print
-    print '# Information à priori dans les daily plutôt que dans les 3h. Facultatif. Valeur par défaut: 0'
-    print 'HIST_DAY = %d' % cfg['HIST_DAY']
+    print()
+    print('# Information à priori dans les daily plutôt que dans les 3h. Facultatif. Valeur par défaut: 0')
+    print('HIST_DAY = %d' % cfg['HIST_DAY'])
 
-    print
-    print "# Délai en jours admissible pour l'information à priori. Facultatif. Valeur par défaut: 1"
-    print 'MAXHIST = %d' % cfg['MAXHIST']
+    print()
+    print("# Délai en jours admissible pour l'information à priori. Facultatif. Valeur par défaut: 1")
+    print('MAXHIST = %d' % cfg['MAXHIST'])
 
-    print
-    print "# Sorties instantanées. Facultatif. Valeur par défaut: 0"
-    print 'INST_OUT = %d' % cfg['INST_OUT']
+    print()
+    print("# Sorties instantanées. Facultatif. Valeur par défaut: 0")
+    print('INST_OUT = %d' % cfg['INST_OUT'])
 
-    print
-    print "# Mode accéléré. Facultatif. Valeur par défaut: 0"
-    print 'ACCELERATE = %d' % cfg['ACCELERATE']
+    print()
+    print("# Mode accéléré. Facultatif. Valeur par défaut: 0")
+    print('ACCELERATE = %d' % cfg['ACCELERATE'])
+
+    print()
+    print('# Use FLOTSAM as RTM 1 - yes 0 - MSA.')
+    print('FLOTSAM_FLAG = ', cfg['FLOTSAM_FLAG'])
 
     datedir1, yeardir1 = cfg['DATEDIR'] not in (0,2), cfg['YEARDIR'] not in (0,2)
     datedir2, yeardir2 = cfg['DATEDIR'] >= 2, cfg['YEARDIR'] >= 2

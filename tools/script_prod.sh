@@ -23,9 +23,9 @@ FDSK_BASE_DIR=/cnrm/vegeo/SAT/DATA/AERUS/FULLDISK
 # Repertoire de base des extractions AERONET des donnees d'entree GeoL1B, Angles, AE1 et AE2 
 ARNT_BASE_DIR=/cnrm/vegeo/SAT/DATA/AERUS/AERONET
 # Repertoire de base des produits d'entree AE2
-AER_BASE_DIR=/cnrm/vegeo/ceamanosx/Work/AERUS-GEO/outputs
+AER_BASE_DIR=outputs
 # Repertoire de base des produits de sortie AE2
-AER_OUT_DIR=/cnrm/vegeo/ceamanosx/Work/AERUS-GEO/outputs
+AER_OUT_DIR=outputs
 
 # MacBook - X. Ceamanos
 #DATE_EXE=gdate
@@ -42,7 +42,7 @@ AER_OUT_DIR=/cnrm/vegeo/ceamanosx/Work/AERUS-GEO/outputs
 
 function usage {
     echo
-    echo "Usage : `basename $0` -d <datedeb> [ -D <datefin> ] [ -m 0|1|2 ] [ -n ] [ -a ] [ -s ] [ -b ] [ -c ] [ -e ] [ -u ] [ -v ] [ -V] [ -t <tag> ] [ -x ]"
+    echo "Usage : `basename $0` -d <datedeb> [ -D <datefin> ] [ -m 0|1|2 ] [ -n ] [ -a ] [ -s ] [ -b ] [ -c ] [ -e ] [ -u ] [ -v ] [ -V] [ -t <tag> ] [ -x ] [ -F ]"
     echo " -d: processing beginning date: YYYYMMDD (daily mode) or YYYYMMDDhhmm (instantaneous mode)"
     echo " -D: processing end date (same format as beg. date); beginning date if missing"
     echo " -m: mode - 0:daily (default), 1:instantaneous; 2:daily + instantaneous"
@@ -52,6 +52,7 @@ function usage {
     echo " -b: add browses to L3 product (unactivated if AERONET subsetting)"
     echo " -c: check L1 data disponibility for the day of run and L3 data for the eve"
     echo " -e: no L1 check at the end date"
+    echo " -F: use FLOTSAM as RTM"
     echo " -u: use unbiased AOD inputs (default: standard AOD inputs)"
     echo " -v: verif only (do not lauch execution)"
     echo " -V: verbose (displays executed commands); automatic if -v"
@@ -78,8 +79,8 @@ function process {
 }
 
 START=0; BROWSE=0; DATEDEB=''; DATEFIN=''; ENDCHK=1; DEBUG=0; DAILY=1; NRT=0;
-AERONET=0;EXECMODE=0;CHECK=0;VERBOSE=0;TAG='';UNBIAS=0;ACCELERATE=0
-while getopts d:D:m:naxsbceuvVt:h c; do
+AERONET=0;EXECMODE=0;CHECK=0;VERBOSE=0;TAG='';UNBIAS=0;ACCELERATE=0;FLOTSAM_FLAG=0;
+while getopts d:D:m:naxsbceuvVt:Fh c; do
     case $c in
 	d) DATEDEB=$OPTARG;;
 	D) DATEFIN=$OPTARG;;
@@ -95,6 +96,7 @@ while getopts d:D:m:naxsbceuvVt:h c; do
 	v) DEBUG=1;;
 	V) VERBOSE=1;;
 	t) TAG=$OPTARG;;
+        F) FLOTSAM_FLAG=1;;
 	h) usage; exit;;
 	\?) echo "Option invalide"; usage; exit;;
     esac
@@ -232,7 +234,7 @@ while [ $dt != $dfin ]; do
     PCFFIL=${PCF_DIR}/${rdt}.pcf
 
     process "mkdir -p $PCF_DIR $OUT_DIR $LOG_DIR"
-    process "python tools/MakeAerusL3Pcf.py -v $AE2VRS -M $MAIN_DIR -O $OUT_DIR -T $TMP_DIR -B $AER_BASE_DIR -A $BASE_DIR -1 $AE1_DIR -2 $AE2_DIR -t $trh -s $START -x $ACCELERATE -d $rdt -V $verb -n $NRT -D 3 -N $NSLOTS -m $MAXHIST $pcf &> $PCFFIL"
+    process "python tools/MakeAerusL3Pcf.py -v $AE2VRS -M $MAIN_DIR -O $OUT_DIR -T $TMP_DIR -B $AER_BASE_DIR -A $BASE_DIR -1 $AE1_DIR -2 $AE2_DIR -t $trh -s $START -x $ACCELERATE -d $rdt -V $verb -n $NRT -D 3 -N $NSLOTS -m $MAXHIST -F $FLOTSAM_FLAG $pcf &> $PCFFIL"
 
 #    process "(time python src/FMK_AerusL3.py -Y 360 -g MSG+0000 $PCFFIL) &> $LOGFIL"
 #    process "(time python src/FMK_AerusL3.py -Y 180,210,360,515,578 -g MSG+0000 $PCFFIL) &> $LOGFIL"
@@ -242,7 +244,9 @@ while [ $dt != $dfin ]; do
 #    process "(time python src/FMK_AerusL3.py -Y 85,87,362 -g MSG+0000 $PCFFIL) &> $LOGFIL"
 #    process "(time python src/FMK_AerusL3.py -Y 141,180,204,210,286,360,479,482,515,560,578 -g MSG+0000 $PCFFIL) &> $LOGFIL"
 #    process "(time python src/FMK_AerusL3.py -Y 1,96,111,180,217,360,515,578,583 -g MSG+0000 $PCFFIL) &> $LOGFIL"
-    process "(time python src/FMK_AerusL3.py -g MSG+0000 $PCFFIL) &> $LOGFIL"
+    #process "(time python src/FMK_AerusL3.py -g MSG+0000 $PCFFIL) &> $LOGFIL"
+    #process "(time python src/FMK_AerusL3_flotsam.py -g MSG+0000 $PCFFIL) &> $LOGFIL"
+    process "(time python src/FMK_AerusL3.py -g MSG+0000 $PCFFIL)"
 
     process "rm -f $TMP_DIR/*"
 
