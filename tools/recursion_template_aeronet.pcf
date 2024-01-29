@@ -1,0 +1,34 @@
+$GEOREG=MSG+0000
+#$GEOREG=MSG+0415
+
+$NRT = 0
+$NRTEXT =
+ 
+$VERSL1 = 1.03
+$VERSL3 = 1.02
+
+$PROD_VER = 1.02
+
+# Repertoire de base des extractions aeronet des produits GEO
+$GEOBASEDIR = /cnrm/vegeo/SAT/DATA/AERUS/AERONET
+
+@recursion_template_common.inc
+
+# Sous-repertoire des angles
+ANGLEDIR = GEO_L1B-ANGLES.AERONET.v1.00
+
+# Sous-repertoire des produits AERUS-L1
+AE1DIR = GEO_AERUS${NRTEXT}-L1-${GEOREG}.AERONET.v${VERSL1}
+
+# Sous-repertoire des produits "memoire" AERUS-L3
+AE2DIR = SEV_AERUS-INTERNAL${NRTEXT}-D3.AERONET.v${VERSL3}
+
+# Nom du fichier modele de subsetting (recherche dans ancillary).
+# Facultatif. Valeur par defaut: "" (pas de subsetting)'
+SUBSET = msg+0000_aeronet.2d.h5
+
+# Extension a ajouter en fin de nom de fichier (utile en cas de subsetting).'
+# Facultatif. Valeur par defaut: '' (pas d'extension)"
+EXTENSION = AERONET
+
+MAXHIST=30

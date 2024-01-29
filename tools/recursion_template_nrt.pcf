@@ -1,0 +1,16 @@
+$GEOREG=MSG+0000
+#$GEOREG=MSG+0415
+
+$NRT = 1
+$NRTEXT = -NRT
+
+$VERSL1 = 1.00
+$VERSL3 = 1.02
+
+$PROD_VER = 1.02
+
+# Répertoire de base des produits GEO
+$GEOBASEDIR = /DATA/LIENS/GEO/$GEOREG
+#$GEOBASEDIR = /work_dev/data/six/GEO/$GEOREG
+
+@recursion_template_common.inc

@@ -1,0 +1,747 @@
+#!/usr/local/bin/python
+# -*- coding: utf-8 -*-
+
+from AerusL3_BasicImports import *
+from AerusL3_Reading import GetProductCfg
+from AerusL3_Smoothing import *
+
+WRITTEN_FILE = None
+OUT_HDL = None
+
+# Attributes to keep from AERUS-L1 products
+KEEP_ATTR = ['Geographic_Projection', 'Nadir_Pixel_Size', 'Projection_Longitude', 'Sub_Satellite_Longitude',
+             'Altitude', 'Northernmost_Latitude', 'Southernmost_Latitude', 'Westernmost_Longitude',
+             'Easternmost_Longitude', 'Sensors', 'Beginning_Acquisition_Date', 'End_Acquisition_Date',
+             'L3_Input_Files', 'L1_Input_Files', 'Angles_Input_Files', 'Region_Name', 'ECMWF_Mode', 'ECMWF_Step',
+             'Number_of_Columns_in_Region', 'Number_of_Rows_in_Region', 'Ancillary_Files', 'Processing_Mode']
+
+
+def GetCommonGlobalAttributes(cfg):
+
+    # Add some default Icare global attributes
+    ret =  GetIcareCgtdMetadata(cfg['PROD_VER'], AERUS_L3_VER, cfg['ICARE_ID'])
+
+    # Keep some input files global attributes
+    for key in KEEP_ATTR:
+        if key in g_attr_r: ret[key] = g_attr_r[key]
+
+    ret.update(dict(
+        HDF5_Version                   = GetHDF5Version(),
+        Attributes_Info                = 'TBD',
+        Algorithm_Version              = get_fortran_string(py_ifc.version),
+        Compression                    = py_ifc.compression,
+        Centre                         = "Meteo France",
+        Collection                     = AERUS_L3_COLLECTION,
+        Contact_Developer              = cfg['CONTACT'],
+        Product_Type                   = cfg['PRODUCT'],
+        Product_Family                 = cfg['PRODUCT_NAME'],
+        Product_Name                   = cfg['BYPRODUCT'],
+        Reference                      = cfg['REFERENCE'],
+        Reference_URL                  = cfg['REF_URL'],
+        Daily_Available_Scenes         = py_ifc.n_scenes,
+        ))
+
+    try   : ret['HDF4_Version'] = GetHDF4Version()
+    except: ret['HDF4_Version'] = 'N/A'
+
+    if cfg['TRIHOR']:
+        ret['Date'] = IcareHdfUTC(cfg['DATETIME'])
+        ret['Time_Range'] = "frequency: 3 hours"
+    else            :
+        ret['Date'] = IcareHdfDateIso(cfg['DATETIME'].date())
+        ret['Time_Range'] = "frequency: daily"
+    return ret
+
+
+def GetMostCommonGlobalAttributes(cfg, stat_type, nparms, act_size, fld_type, level):
+    ret = GetCommonGlobalAttributes(cfg)
+    ret.update(GetMostCommonGroupAttributes(cfg, stat_type, nparms, act_size, fld_type, level))
+    return ret
+
+
+def GetMostCommonGroupAttributes(cfg, stat_type, nparms, act_size, fld_type, level):
+    return dict(
+        Parent_Product_Name = [brf_p] + ['/'.join(angles_p[:2])] + ['/'.join(angles_p[2:])] + ['-'],
+        Field_Type          = fld_type,
+        Statistic_Type      = stat_type,
+        Nb_Parameters       = nparms,
+        Product_Actual_Size = "%10d" % act_size,
+        Processing_Level    = str(level),
+        )
+
+
+def GetMostCommonDatasetAttributes(cfg):
+    if cfg['SUBSET'] is not None: nlin, ncol = cfg['SUBSET_COLS'].shape
+    else: nlin, ncol = py_ifc.msgpixy, py_ifc.msgpixx
+    return dict(
+        Class            = "Data",
+        N_Cols           = ncol,
+        N_Lines          = nlin,
+        Offset           = 0.,
+        scale_factor     = 1.,
+        scale_factor_err = 0.,
+        add_offset       = 0.,
+        add_offset_err   = 0.,
+        Product_Id       = 128,
+        units            = "1",
+        Scaling_Factor   = 1.,
+        Missing_Output   = py_ifc.missingvalue_kcov,
+        )
+
+
+def WriteOfficialProducts(cfg, stat_type, files_out, files_out_in):
+    cfg['BYPRODUCT'] = 'AEROSOL'
+    WriteAerosol(cfg, stat_type, files_out, files_out_in, do_close=True)    # Write Aerosol output product
+    if cfg['ALB_OFF_PRD'] and not cfg['ACCELERATE']:
+        cfg['BYPRODUCT'] = 'ALBEDOS'
+        WriteAlbedo(cfg, stat_type, files_out, files_out_in, do_close=True) # Write Albedo  output product
+
+
+def WriteUnofficialProducts(cfg, stat_type, files_out, files_out_in, compo=False):
+    closing = not cfg['PROD_MODE']
+    cfg['BYPRODUCT'] = 'INTERNAL'
+    if not cfg['ALB_OFF_PRD']: WriteAlbedo(cfg, stat_type, files_out, files_out_in, do_close=closing) # Write albedo output
+    WriteBRDFModel(cfg, stat_type, files_out, files_out_in, compo=compo, do_close=closing)            # Write BRDF-model output
+    WriteCovarianceMatrix(cfg, stat_type, files_out, files_out_in, do_close=True)                     # Write covariance matrix output
+
+
+def WriteAlbedo(cfg, stat_type, files_out, files_out_in, do_close=False):
+    closing = not cfg['PROD_MODE']
+    WriteSpectralAlbedo (cfg, stat_type, files_out, files_out_in, do_close=closing)  # Write spectral  albedo output
+    closing = do_close or not cfg['PROD_MODE']
+    WriteBroadbandAlbedo(cfg, stat_type, files_out, files_out_in, do_close=closing)  # Write broadband albedo output
+
+
+def WriteBRDFModel(cfg, stat_type, files_out, files_out_in, compo=False, do_close=False):
+    n_data_w = 6+3
+    if compo: n_data_w = 5+3
+    g_attr_w = GetMostCommonGroupAttributes(cfg, stat_type, n_data_w, start_mod.n_pix*(
+            (4+3)*py_ifc.parkind + py_ifc.quakind + (n_data_w - 5-3)*py_ifc.agekind), "Internal Product", 2)
+
+    # Specify common specific attributes for the datasets of the BRDF-Model output files
+    d_attr_w = [None]*n_data_w
+    for i in range(n_data_w): d_attr_w[i] = GetMostCommonDatasetAttributes(cfg)
+
+    # Specify datasets names and type
+    dset_names = (par_d + par_d_ + [qua_d, age_d])[:n_data_w]
+    dset_types = ([par_dt]*(py_ifc.mmp1+0+3) + [qua_dt, age_dt])[:n_data_w]
+
+    # Specify attributes for the four first datasets of the BRDF-Model output files
+    for i in range(py_ifc.mmp1):
+        d_attr_w[i]['Nb_Bytes']       = py_ifc.parkind
+        d_attr_w[i]['Scaling_Factor'] = py_ifc.scale_par
+        d_attr_w[i]['long_name']      = "BRDF Model Parameter for DAILY k%d" % i
+    for i in range(py_ifc.mmp1-1):
+        d_attr_w[i+py_ifc.mmp1]['Nb_Bytes']       = py_ifc.parkind
+        d_attr_w[i+py_ifc.mmp1]['Scaling_Factor'] = py_ifc.scale_par
+        d_attr_w[i+py_ifc.mmp1]['long_name']      = "BRDF Model Parameter for INST k%d" % i
+
+
+    # Specify attributes for the fifth dataset of the BRDF-Model output files
+    d_attr_w[py_ifc.mmp1+py_ifc.mmp1-1]['Nb_Bytes']       = py_ifc.quakind
+    d_attr_w[py_ifc.mmp1+py_ifc.mmp1-1]['long_name']      = qua_p
+    d_attr_w[py_ifc.mmp1+py_ifc.mmp1-1]['Missing_Output'] = 999
+    d_attr_w[py_ifc.mmp1+py_ifc.mmp1-1]['units']          = "N/A"
+
+    # If only recursion, specify attributes for the sixth dataset of the BRDF-Model output files
+    if not compo:
+        d_attr_w[py_ifc.mmp1+py_ifc.mmp1]['Nb_Bytes']       = py_ifc.agekind
+        d_attr_w[py_ifc.mmp1+py_ifc.mmp1]['long_name']      = age_p
+        d_attr_w[py_ifc.mmp1+py_ifc.mmp1]['Missing_Output'] = py_ifc.missingvalue
+        d_attr_w[py_ifc.mmp1+py_ifc.mmp1]['units']          = "Days"
+
+    # Get data
+    data_w = [None]*n_data_w
+    closing = not cfg['PROD_MODE']
+    for i in range(py_ifc.n_channels):
+        g_attr_w['Band']           = cfg['VIS_CHN'][i]
+        g_attr_w['ByProduct_Name'] = par_p[i]
+
+        fout_in_name = path.split(files_out_in[i*py_ifc.n_files_out_channel])[1]
+        fout_name    = path.split(files_out   [i*py_ifc.n_files_out_channel])[1]
+
+        # Model parameters
+        for n in range(py_ifc.mmp1):
+            fpath = path.join(cfg['TMPDIR'], "%s.K%c.gb%d" % (fout_in_name, chr(48+n), py_ifc.parkind))
+            data_w[n] = fromfile(fpath, dtype=dset_types[n])
+        for n in range(py_ifc.mmp1-1):
+            fpath = path.join(cfg['TMPDIR'], "%s.R%c.gb%d" % (fout_in_name, chr(48+n), py_ifc.parkind))
+            data_w[n+py_ifc.mmp1] = fromfile(fpath, dtype=dset_types[n+py_ifc.mmp1])
+
+        # Quality flag
+        fpath = path.join(cfg['TMPDIR'], "%s.qua.gb%d" % (fout_in_name, py_ifc.quakind))
+        data_w[py_ifc.mmp1+py_ifc.mmp1-1] = fromfile(fpath, dtype=dset_types[py_ifc.mmp1+py_ifc.mmp1-1])
+
+        # Age of observation
+        if not compo:
+            fpath = path.join(cfg['TMPDIR'], "%s.age.gb%d" % (fout_in_name, py_ifc.agekind))
+            data_w[py_ifc.mmp1+py_ifc.mmp1] = fromfile(fpath, dtype=dset_types[py_ifc.mmp1+py_ifc.mmp1])
+
+        # Write the result into the HDF5-file
+        if i + 1 == py_ifc.n_channels: closing = not cfg['PROD_MODE'] or do_close
+        if WriteOutputProduct(cfg, path.join(cfg['OUTDIR'], fout_name), g_attr_w, dset_names, d_attr_w,
+                              data_w, '%s BRDF model' % cfg['VIS_CHN'][i], do_close=closing) is None: exit(1)
+
+
+def WriteCovarianceMatrix(cfg, stat_type, files_out, files_out_in, do_close=False):
+    n_data_w = 10
+    g_attr_w = GetMostCommonGroupAttributes(cfg, stat_type, n_data_w, start_mod.n_pix*(
+            n_data_w*py_ifc.covkind), "Internal Product", 2)
+
+    # Specify datasets names and type
+    dset_names = cov_d
+    dset_types = [cov_dt]*len(dset_names)
+
+    d_attr_w = [None]*n_data_w
+    for i in range(n_data_w):
+        d_attr_w[i] = GetMostCommonDatasetAttributes(cfg)
+        d_attr_w[i].update(dict(
+                Nb_Bytes       = py_ifc.covkind,
+                Scaling_Factor = py_ifc.scale_cov ))
+    j = 0
+    for n in range(py_ifc.mmp1):
+        for nn in range(n, py_ifc.mmp1):
+            d_attr_w[j]['long_name'] = "Covariance Matrix Element %d%d" % (n, nn)
+            j += 1
+
+    # Get data
+    data_w = [None]*n_data_w
+    closing = not cfg['PROD_MODE']
+    for i in range(py_ifc.n_channels):
+        g_attr_w['Band']           = cfg['VIS_CHN'][i]
+        g_attr_w['ByProduct_Name'] = cov_p[i]
+
+        fout_in_name = path.split(files_out_in[i*py_ifc.n_files_out_channel + 1])[1]
+        fout_name    = path.split(files_out   [i*py_ifc.n_files_out_channel + 1])[1]
+
+        j = 0
+        for n in range(py_ifc.mmp1):
+            for nn in range(n, py_ifc.mmp1):
+                fpath = path.join(cfg['TMPDIR'], "%s.E%c.gb%d" % (fout_in_name, chr(48+j+1), py_ifc.covkind))
+                data_w[j] = fromfile(fpath, dtype=dset_types[j])
+                j += 1
+
+        if i + 1 == py_ifc.n_channels: closing = not cfg['PROD_MODE'] or do_close
+        if WriteOutputProduct(cfg, path.join(cfg['OUTDIR'], fout_name), g_attr_w, dset_names, d_attr_w,
+                              data_w, '%s covariance matrix' % cfg['VIS_CHN'][i], do_close=closing) is None: exit(1)
+
+
+def WriteSpectralAlbedo(cfg, stat_type, files_out, files_out_in, do_close=False):
+    n_data_w = 6
+    g_attr_w = GetMostCommonGroupAttributes(cfg, stat_type, n_data_w, start_mod.n_pix*(
+            4*py_ifc.albkind +  py_ifc.quakind + py_ifc.agekind), "Product", 3)
+
+    # Specify datasets names and type
+    dset_names = alb_d + [qua_d, age_d]
+    dset_types = [alb_dt]*len(alb_d) + [qua_dt, age_dt]
+
+    d_attr_w = [None]*n_data_w
+    for i in range(n_data_w): d_attr_w[i] = GetMostCommonDatasetAttributes(cfg)
+    for i in range(n_data_w - 2):
+        d_attr_w[i].update(dict(
+                Nb_Bytes       = py_ifc.albkind,
+                Scaling_Factor = py_ifc.scale_alb,
+                long_name      = alb_p[i],
+                Missing_Output = py_ifc.missingvalue,
+                ))
+        if i%2 == 0: d_attr_w[i]['Product_Id'] = 84
+
+    # Specify attributes for the fifth dataset of the BRDF-Model output files
+    d_attr_w[4]['Nb_Bytes']       = py_ifc.quakind
+    d_attr_w[4]['long_name']      = qua_p
+    d_attr_w[4]['Missing_Output'] = 999
+    d_attr_w[4]['units']          = "N/A"
+
+    # Specify attributes for the sixth dataset of the BRDF-Model output files
+    d_attr_w[4+1]['Nb_Bytes']       = py_ifc.agekind
+    d_attr_w[4+1]['long_name']      = age_p
+    d_attr_w[4+1]['Missing_Output'] = py_ifc.missingvalue
+    d_attr_w[4+1]['units']          = "Days"
+
+    # Get data
+    data_w = [None]*n_data_w
+    closing = not cfg['PROD_MODE']
+    for i in range(py_ifc.n_channels):
+        g_attr_w['Band']                = cfg['VIS_CHN'][i]
+        g_attr_w['Parent_Product_Name'] = [par_p[i]] + [cov_p[i]] + [lat_p] + ['-']
+        g_attr_w['ByProduct_Name']      = asp_p[i]
+
+        fout_in_name = path.split(files_out_in[i*py_ifc.n_files_out_channel + 2])[1]
+        fout_name    = path.split(files_out[i*py_ifc.n_files_out_channel + 2])[1]
+
+        # Spectral directional-hemispherical albedo
+        fpath = path.join(cfg['TMPDIR'], "%s.asdh.gb%d" % (fout_in_name, py_ifc.albkind))
+        data_w[0] = fromfile(fpath, dtype=dset_types[0])
+        # Error of spectral directional-hemispherical albedo
+        fpath = path.join(cfg['TMPDIR'], "%s.asdh_err.gb%d" % (fout_in_name, py_ifc.albkind))
+        data_w[1] = fromfile(fpath, dtype=dset_types[1])
+        # Spectral bi-hemispherical albedo
+        fpath = path.join(cfg['TMPDIR'], "%s.asbh.gb%d" % (fout_in_name, py_ifc.albkind))
+        data_w[2] = fromfile(fpath, dtype=dset_types[2])
+        # Error of spectral bi-hemispherical albedo
+        fpath = path.join(cfg['TMPDIR'], "%s.asbh_err.gb%d" % (fout_in_name, py_ifc.albkind))
+        data_w[3] = fromfile(fpath, dtype=dset_types[3])
+        # Quality flag
+        fpath = path.join(cfg['TMPDIR'], "%s.qua.gb%d" % (fout_in_name, py_ifc.quakind))
+        data_w[4] = fromfile(fpath, dtype=dset_types[4])
+        # Age of observation
+        fpath = path.join(cfg['TMPDIR'], "%s.age.gb%d" % (fout_in_name, py_ifc.agekind))
+        data_w[5] = fromfile(fpath, dtype=dset_types[5])
+
+        if i + 1 == py_ifc.n_channels: closing = not cfg['PROD_MODE'] or do_close
+        if WriteOutputProduct(cfg, path.join(cfg['OUTDIR'], fout_name), g_attr_w, dset_names, d_attr_w,
+                              data_w, '%s spectral albedo' % cfg['VIS_CHN'][i], do_close=closing) is None: exit(1)
+
+
+def WriteBroadbandAlbedo(cfg, stat_type, files_out, files_out_in, do_close=False):
+    n_data_w = 10
+    g_attr_w = GetMostCommonGroupAttributes(cfg, stat_type, n_data_w, start_mod.n_pix*(
+           8*py_ifc.albkind +  py_ifc.quakind + py_ifc.agekind), "Product", 3)
+
+    # Specify general attributes for the broadband albedo output files
+    g_attr_w['ByProduct_Name']      = "ALBEDO"
+    g_attr_w['Parent_Product_Name'] = asp_p + ['-']
+
+    # Specify datasets names and type
+    dset_names = bal_d + [qua_d, age_d]
+    dset_types = [alb_dt]*len(bal_d) + [qua_dt, age_dt]
+
+    d_attr_w = [None]*n_data_w
+    for i in range(n_data_w): d_attr_w[i] = GetMostCommonDatasetAttributes(cfg)
+    for i in range(n_data_w - 2):
+        d_attr_w[i].update(dict(
+                Nb_Bytes       = py_ifc.albkind,
+                Scaling_Factor = py_ifc.scale_alb,
+                long_name      = bal_p[i],
+                Missing_Output = py_ifc.missingvalue,
+                ))
+        if i%2 == 0: d_attr_w[i]['Product_Id'] = 84
+
+    # Specify attributes for the nineth dataset of the broadband albedo output file
+    d_attr_w[8]['Nb_Bytes']       = py_ifc.quakind
+    d_attr_w[8]['long_name']      = qua_p
+    d_attr_w[8]['Missing_Output'] = 999
+    d_attr_w[8]['units']          = "N/A"
+
+    # Specify attributes for the tenth dataset of the broadband albedo output file
+    d_attr_w[8+1]['Nb_Bytes']       = py_ifc.agekind
+    d_attr_w[8+1]['long_name']      = age_p
+    d_attr_w[8+1]['Missing_Output'] = py_ifc.missingvalue
+    d_attr_w[8+1]['units']          = "Days"
+
+    # Get data
+    data_w = [None]*n_data_w
+    fout_in_name = path.split(files_out_in[py_ifc.n_channels*py_ifc.n_files_out_channel])[1]
+    fout_name = path.split(files_out[py_ifc.n_channels*py_ifc.n_files_out_channel])[1]
+
+    # Total broadband directional-hemispherical albedo
+    fpath = path.join(cfg['TMPDIR'], "%s.abdh.gb%d" % (fout_in_name, py_ifc.albkind))
+    data_w[0] = fromfile(fpath, dtype=dset_types[0])
+    # Error of total broadband directional-hemispherical albedo
+    fpath = path.join(cfg['TMPDIR'], "%s.abdh_err.gb%d" % (fout_in_name, py_ifc.albkind))
+    data_w[1] = fromfile(fpath, dtype=dset_types[1])
+    # Total broadband bi-hemispherical albedo
+    fpath = path.join(cfg['TMPDIR'], "%s.abbh.gb%d" % (fout_in_name, py_ifc.albkind))
+    data_w[2] = fromfile(fpath, dtype=dset_types[2])
+    # Error of total broadband bi-hemispherical albedo
+    fpath = path.join(cfg['TMPDIR'], "%s.abbh_err.gb%d" % (fout_in_name, py_ifc.albkind))
+    data_w[3] = fromfile(fpath, dtype=dset_types[3])
+    # Visual broadband directional-hemispherical albedo
+    fpath = path.join(cfg['TMPDIR'], "%s.avdh.gb%d" % (fout_in_name, py_ifc.albkind))
+    data_w[4] = fromfile(fpath, dtype=dset_types[4])
+    # Error of visual broadband directional-hemispherical albedo
+    fpath = path.join(cfg['TMPDIR'], "%s.avdh_err.gb%d" % (fout_in_name, py_ifc.albkind))
+    data_w[5] = fromfile(fpath, dtype=dset_types[5])
+    # Near infrared broadband directional-hemispherical albedo
+    fpath = path.join(cfg['TMPDIR'], "%s.andh.gb%d" % (fout_in_name, py_ifc.albkind))
+    data_w[6] = fromfile(fpath, dtype=dset_types[6])
+    # Error of near infrared broadband directional-hemispherical albedo
+    fpath = path.join(cfg['TMPDIR'], "%s.andh_err.gb%d" % (fout_in_name, py_ifc.albkind))
+    data_w[7] = fromfile(fpath, dtype=dset_types[7])
+    # Quality flag
+    fpath = path.join(cfg['TMPDIR'], "%s.qua.gb%d" % (fout_in_name, py_ifc.quakind))
+    data_w[8] = fromfile(fpath, dtype=dset_types[8])
+    # Age of observation
+    fpath = path.join(cfg['TMPDIR'], "%s.age.gb%d" % (fout_in_name, py_ifc.agekind))
+    data_w[9] = fromfile(fpath, dtype=dset_types[9])
+
+    if WriteOutputProduct(cfg, path.join(cfg['OUTDIR'], fout_name), g_attr_w, dset_names,
+                          d_attr_w, data_w, "albedo product", do_close=do_close) is None: exit(1)
+
+
+def WriteAerosol(cfg, stat_type, files_out, files_out_in, do_close=False):
+#    n_data_w = py_ifc.n_channels*2 + 3
+    n_data_w = py_ifc.max_nchannels*2 + 3
+    g_attr_w = GetMostCommonGlobalAttributes(cfg, stat_type, n_data_w, start_mod.n_pix*(
+            py_ifc.n_channels*(py_ifc.parkind + py_ifc.covkind) + py_ifc.quakind + py_ifc.agekind + py_ifc.parkind), "Product", 3)
+
+    # Specify general attributes for the BRDF-Model output files
+    g_attr_w['ByProduct_Name'] = "AEROSOL"
+
+    # Specify datasets names and type
+    dset_names = aer_d + [qua_d, age_d, ags_d]
+#    dset_types = [par_dt]*(py_ifc.n_channels+0) + [cov_dt]*(py_ifc.n_channels+0) + [qua_dt, age_dt, par_dt]
+    dset_types = [par_dt]*(py_ifc.max_nchannels+0) + [cov_dt]*(py_ifc.max_nchannels+0) + [qua_dt, age_dt, par_dt]
+
+    d_attr_w = [None]*n_data_w
+    for i in range(n_data_w): d_attr_w[i] = GetMostCommonDatasetAttributes(cfg)
+
+    # Specify attributes for the three first datasets of the BRDF-Model output files
+#    for i in range(py_ifc.n_channels):
+    for i in range(py_ifc.max_nchannels):
+        d_attr_w[i]['Nb_Bytes']       = py_ifc.parkind
+        d_attr_w[i]['Scaling_Factor'] = py_ifc.scale_par
+        d_attr_w[i]['long_name']      = aer_p[i]
+
+    # Specify attributes for the three next datasets of the BRDF-Model output files
+#    for i in range(py_ifc.n_channels, 2*py_ifc.n_channels):
+    for i in range(py_ifc.max_nchannels, 2*py_ifc.max_nchannels):
+        d_attr_w[i]['Nb_Bytes']       = py_ifc.covkind
+        d_attr_w[i]['Scaling_Factor'] = py_ifc.scale_cov
+        d_attr_w[i]['long_name']      = aer_p[i]
+
+    # Specify attributes for the seventh dataset of the BRDF-Model output files
+#    d_attr_w[2*py_ifc.n_channels]['Nb_Bytes']       = py_ifc.quakind
+#    d_attr_w[2*py_ifc.n_channels]['long_name']      = qua_p
+#    d_attr_w[2*py_ifc.n_channels]['Missing_Output'] = 999
+#    d_attr_w[2*py_ifc.n_channels]['units']          = "N/A"
+    d_attr_w[2*py_ifc.max_nchannels]['Nb_Bytes']       = py_ifc.quakind
+    d_attr_w[2*py_ifc.max_nchannels]['long_name']      = qua_p
+    d_attr_w[2*py_ifc.max_nchannels]['Missing_Output'] = 999
+    d_attr_w[2*py_ifc.max_nchannels]['units']          = "N/A"
+
+    # Specify attributes for the eighth dataset of the BRDF-Model output files
+#    d_attr_w[2*py_ifc.n_channels+1]['Nb_Bytes']       = py_ifc.agekind
+#    d_attr_w[2*py_ifc.n_channels+1]['long_name']      = age_p
+#    d_attr_w[2*py_ifc.n_channels+1]['Missing_Output'] = py_ifc.missingvalue
+#    d_attr_w[2*py_ifc.n_channels+1]['units']          = "Days"
+    d_attr_w[2*py_ifc.max_nchannels+1]['Nb_Bytes']       = py_ifc.agekind
+    d_attr_w[2*py_ifc.max_nchannels+1]['long_name']      = age_p
+    d_attr_w[2*py_ifc.max_nchannels+1]['Missing_Output'] = py_ifc.missingvalue
+    d_attr_w[2*py_ifc.max_nchannels+1]['units']          = "Days"
+
+    # Get data
+    data_w = [None]*n_data_w
+    fout_in_name = path.split(files_out_in[py_ifc.n_channels*py_ifc.n_files_out_channel + 1])[1]
+    fout_name = path.split(files_out[py_ifc.n_channels*py_ifc.n_files_out_channel + 1])[1]
+
+    for i in range(py_ifc.n_channels):
+
+        # Model parameters
+        fin_name = path.split(files_out_in[i*py_ifc.n_files_out_channel])[1]
+        for n in range(py_ifc.mm, py_ifc.mmp1):
+            fpath = path.join(cfg['TMPDIR'], "%s.K%c.gb%d" % (fin_name, chr(48+n), py_ifc.parkind))
+            data_w[i] = fromfile(fpath, dtype=dset_types[i])
+
+        # Covariance matrix elements
+        fin_name = path.split(files_out_in[i*py_ifc.n_files_out_channel + 1])[1]
+        j = py_ifc.mm*py_ifc.mm
+        fpath = path.join(cfg['TMPDIR'], "%s.E%c.gb%d" % (fin_name, chr(48+j+1), py_ifc.covkind))
+#        data_w[i+3] = fromfile(fpath, dtype=dset_types[i+3])
+        data_w[i+py_ifc.max_nchannels] = fromfile(fpath, dtype=dset_types[i+py_ifc.max_nchannels])
+#XC#
+    for i in range(py_ifc.n_channels, py_ifc.max_nchannels):                            #XC#
+        data_w[i]   = -32768*ones_like(data_w[0])                                       #XC#
+        data_w[i+py_ifc.max_nchannels] = -32768*ones_like(data_w[py_ifc.max_nchannels]) #XC#
+#XC#
+
+    # Quality flag
+    iqua = py_ifc.max_nchannels*2
+    fin_name = path.split(files_out_in[0])[1]
+    fpath = path.join(cfg['TMPDIR'], "%s.qua.gb%d" % (fin_name, py_ifc.quakind))
+    data_w[iqua] = fromfile(fpath, dtype=dset_types[iqua])
+
+    # Age of observation
+    iage = iqua + 1
+    fin_name = path.split(files_out_in[0])[1]
+    fpath = path.join(cfg['TMPDIR'], "%s.age.gb%d" % (fin_name, py_ifc.agekind))
+    data_w[iage] = fromfile(fpath, dtype=dset_types[iage])
+
+    # Specify attributes for the ninth dataset of the BRDF-Model output files
+    # AngstrÃ¶m 635-810 (computed, not read)
+    iang = iage + 1
+    d_attr_w[iang]['Nb_Bytes']       = py_ifc.parkind
+    d_attr_w[iang]['Scaling_Factor'] = py_ifc.scale_par
+    d_attr_w[iang]['long_name']      = ags_p
+    data_w  [iang]                   = d_attr_w[0]['Missing_Output']*ones_like(data_w[0])
+    r06 = (data_w[0] - d_attr_w[0]['Offset'])*d_attr_w[0]['Scaling_Factor']
+#XC#
+    if py_ifc.n_channels < py_ifc.max_nchannels :                                        #XC#
+        is_good = where(logical_and(data_w[0] >= AGS_AOD_BNDS[0],                        #XC#
+                                    data_w[0] <= AGS_AOD_BNDS[1]))                       #XC#
+        r08 = ones_like(r06)                                                             #XC#
+    else:                                                                                #XC#
+        is_good = where(logical_and(
+                logical_and(data_w[0] >= AGS_AOD_BNDS[0], data_w[0] <= AGS_AOD_BNDS[1]), #XC#
+                logical_and(data_w[1] >= AGS_AOD_BNDS[0], data_w[1] <= AGS_AOD_BNDS[1])  #XC#
+                ))                                                                       #XC#
+        r08 = (data_w[1] - d_attr_w[1]['Offset'])*d_attr_w[1]['Scaling_Factor']          #XC#
+#XC#
+    data_w[iang][is_good] = int16(rint((-log(r06[is_good]/r08[is_good])/log(0.635/0.810) -
+                                         d_attr_w[iang]['Offset'])*d_attr_w[iang]['Scaling_Factor']))
+
+    if cfg['ACCELERATE']:
+        rnames = filter(lambda x: 'VIS08' not in x and 'IR016' not in x and 'ANGS' not in x, dset_names)
+    else:
+        rnames = [ dset_names[0], dset_names[py_ifc.n_channels + 0]] + dset_names[2*py_ifc.n_channels:]
+
+    out_path = WriteOutputProduct(cfg, path.join(cfg['OUTDIR'], fout_name), g_attr_w, dset_names, d_attr_w,
+                                  data_w, "aerosol product", official=True, do_close=do_close, rnames=rnames)
+    if out_path is None: exit(1)
+
+    if cfg['SMOOTH'] and cfg['SUBSET'] is None: Smoothing(cfg, out_path)
+
+
+def WriteInstantaneous(cfg, stat_type, file_out, file_out_in, inst_dt, do_close=False):
+    cfg['BYPRODUCT'] = 'INSTANTANEOUS'
+#    n_data_w = py_ifc.n_channels + 3
+#    n_data_w = py_ifc.max_nchannels + 4
+#    n_data_w = py_ifc.max_nchannels + 5
+    n_data_w = py_ifc.max_nchannels + 6
+
+    # Specify datasets names and type
+#    dset_names = aer_d[:py_ifc.n_channels] + [qua_d, age_d, ags_d]
+#    dset_types = [par_dt]*(py_ifc.n_channels+0) + [qua_dt, age_dt, par_dt]
+    dset_names = aer_d[:py_ifc.max_nchannels] + [xi_d, ref_d, jacoAOD_d, qua_d, cm_d, ags_d]
+    dset_types = [par_dt]*(py_ifc.max_nchannels+0) + [xi_dt, ref_dt, jacoAOD_dt, qua_dt, cm_dt, par_dt]
+
+    d_attr_w = [None]*n_data_w
+    for i in range(n_data_w): d_attr_w[i] = GetMostCommonDatasetAttributes(cfg)
+
+    # Specify attributes for the three first datasets of the BRDF-Model output files
+#    for i in range(py_ifc.n_channels):
+    for i in range(py_ifc.max_nchannels):
+        d_attr_w[i]['Nb_Bytes']       = py_ifc.parkind
+        d_attr_w[i]['Scaling_Factor'] = py_ifc.scale_par
+        d_attr_w[i]['long_name']      = aer_p[i]
+
+    ixi = py_ifc.max_nchannels + 0
+    d_attr_w[ixi]['Nb_Bytes']       = py_ifc.parkind
+    d_attr_w[ixi]['Scaling_Factor'] = py_ifc.scale_par
+    d_attr_w[ixi]['long_name']      = xi_p
+    d_attr_w[ixi]['Missing_Output'] = py_ifc.missingvalue
+    d_attr_w[ixi]['units']          = "radians"
+
+    iref = ixi + 1
+    d_attr_w[iref]['Nb_Bytes']       = py_ifc.parkind
+    d_attr_w[iref]['Scaling_Factor'] = py_ifc.scale_par
+    d_attr_w[iref]['long_name']      = ref_p
+    d_attr_w[iref]['Missing_Output'] = py_ifc.missingvalue
+    d_attr_w[iref]['units']          = "unitless"
+
+    ijacoAOD = iref + 1
+    d_attr_w[ijacoAOD]['Nb_Bytes']       = py_ifc.parkind
+    d_attr_w[ijacoAOD]['Scaling_Factor'] = py_ifc.scale_par
+    d_attr_w[ijacoAOD]['long_name']      = jacoAOD_p
+    d_attr_w[ijacoAOD]['Missing_Output'] = py_ifc.missingvalue
+    d_attr_w[ijacoAOD]['units']          = "unitless"
+
+#    iqua = py_ifc.n_channels + 0
+#    iqua = py_ifc.max_nchannels + 0
+    iqua = ijacoAOD + 1
+    d_attr_w[iqua]['Nb_Bytes']       = py_ifc.quakind
+    d_attr_w[iqua]['long_name']      = qua_p
+    d_attr_w[iqua]['Missing_Output'] = 999
+    d_attr_w[iqua]['units']          = "N/A"
+
+    iage = iqua + 1
+    d_attr_w[iage]['Nb_Bytes']       = py_ifc.agekind
+    d_attr_w[iage]['long_name']      = cm_p
+    d_attr_w[iage]['Missing_Output'] = py_ifc.missingvalue
+    d_attr_w[iage]['units']          = "Days"
+
+    # Get data
+    data_w = [None]*n_data_w
+    fin_name = path.split(file_out_in)[1]
+    fout_name = path.split(file_out)[1]
+
+    # Model parameters
+    for i in range(py_ifc.n_channels):
+        fpath = path.join(cfg['TMPDIR'], "%s.Ch%c.gb%d" % (fin_name, chr(48+i+1), py_ifc.parkind))
+        data_w[i] = fromfile(fpath, dtype=dset_types[i])
+
+#XC#
+    for i in range(py_ifc.n_channels, py_ifc.max_nchannels):                                           #XC#
+        data_w[i] = asarray(d_attr_w[1]['Missing_Output']*ones_like(data_w[0]), dtype=data_w[0].dtype) #XC#
+#XC#
+
+    # Scattering angle
+    ixi = py_ifc.max_nchannels + 0
+    fpath = path.join(cfg['TMPDIR'], "%s.xi.gb%d" % (fin_name, py_ifc.parkind))
+    data_w[ixi] = fromfile(fpath, dtype=dset_types[ixi])
+
+    # Surface reflectance
+    iref = ixi + 1
+    fpath = path.join(cfg['TMPDIR'], "%s.ref.gb%d" % (fin_name, py_ifc.parkind))
+    data_w[iref] = fromfile(fpath, dtype=dset_types[iref])
+
+    # jacobian AOD
+    ijacoAOD = iref + 1
+    fpath = path.join(cfg['TMPDIR'], "%s.jacoAOD.gb%d" % (fin_name, py_ifc.parkind))
+    data_w[ijacoAOD] = fromfile(fpath, dtype=dset_types[ijacoAOD])
+
+    # Quality flag
+#    iqua = py_ifc.n_channels + 0
+#    iqua = py_ifc.max_nchannels + 0
+    iqua = ijacoAOD + 1
+    fpath = path.join(cfg['TMPDIR'], "%s.qua.gb%d" % (fin_name, py_ifc.quakind))
+    data_w[iqua] = fromfile(fpath, dtype=dset_types[iqua])
+
+    # Age of observation
+    iage = iqua + 1
+    fpath = path.join(cfg['TMPDIR'], "%s.age.gb%d" % (fin_name, py_ifc.agekind))
+    data_w[iage] = fromfile(fpath, dtype=dset_types[iage])
+
+    # Specify attributes for the last dataset of the BRDF-Model output files
+    # AngstrÃ¶m 635-810 (computed, not read)
+    iang = iage + 1
+    d_attr_w[iang]['Nb_Bytes']       = py_ifc.parkind
+    d_attr_w[iang]['Scaling_Factor'] = py_ifc.scale_par
+    d_attr_w[iang]['long_name']      = ags_p
+    data_w  [iang]                   = d_attr_w[0]['Missing_Output']*ones_like(data_w[0])
+    r06 = (data_w[0] - d_attr_w[0]['Offset'])*d_attr_w[0]['Scaling_Factor']
+#XC#
+    if py_ifc.n_channels >= py_ifc.max_nchannels :
+        is_good = where(logical_and(
+                logical_and(data_w[0] >= AGS_AOD_BNDS[0], data_w[0] <= AGS_AOD_BNDS[1]),
+                logical_and(data_w[1] >= AGS_AOD_BNDS[0], data_w[1] <= AGS_AOD_BNDS[1])
+                ))
+        r08 = (data_w[1] - d_attr_w[1]['Offset'])*d_attr_w[1]['Scaling_Factor']
+    else:
+        is_good = where(logical_and(data_w[0] >= AGS_AOD_BNDS[0], data_w[0] <= AGS_AOD_BNDS[1]))
+        r08 = ones_like(r06)
+#XC#
+    data_w[iang][is_good] = int16(rint((-log(r06[is_good]/r08[is_good])/log(0.635/0.810) -
+                                         d_attr_w[iang]['Offset'])*d_attr_w[iang]['Scaling_Factor']))
+
+    rnames = dset_names[:3] + dset_names[py_ifc.n_channels + 0:]
+    if cfg['ACCELERATE']:
+        rnames = filter(lambda x: 'VIS08' not in x and 'IR016' not in x and 'ANGS' not in x, rnames)
+    n_data_w = len(rnames)
+    
+    g_attr_w = GetMostCommonGlobalAttributes(cfg, stat_type, n_data_w, start_mod.n_pix*(
+            py_ifc.parkind + py_ifc.quakind + py_ifc.agekind + py_ifc.parkind), "Product", 3)
+
+    # Specify general attributes for the BRDF-Model output files
+    g_attr_w['ByProduct_Name'] = "INSTANTANEOUS"
+    g_attr_w['Date'] = IcareHdfUTC(inst_dt)
+
+    out_path = WriteOutputProduct(cfg, path.join(cfg['OUTDIR'], fout_name), g_attr_w, dset_names, d_attr_w, data_w,
+                                  "instantaneous estimation", official=True, do_close=do_close, rnames=rnames)
+    if out_path is None: exit(1)
+
+    if cfg['SMOOTH'] and cfg['SUBSET'] is None: Smoothing(cfg, out_path)
+
+
+def WriteFakeHistoryFile(cfg):
+    cfg.update(GetProductCfg(cfg, path.join(cfg['MAINDIR'], CFG_DIR_NAM, PRD_CFG_NAM % cfg['GEOREG'])))
+    if   cfg['TRIHOR']    : sens, nh, dt =  1,  3, datetime.strptime(cfg['DATE'], "%Y%m%d%H%M")
+    elif cfg['DAILY_MODE']: sens, nh, dt =  1, 24, datetime.strptime(cfg['DATE'], "%Y%m%d")
+    else                  : sens, nh, dt = -1,  1, datetime.strptime(cfg['DATE'], "%Y%m%d%H%M")
+    cfg.update(dict(BYPRODUCT='INTERNAL', Input_Files=[], Ancillary_Files=[], DATETIME=dt, NHOURS=nh, SENS=sens))
+    fout_name = IcareHdfFileName('SEV', 'AERUS', 'INTERNAL-' + cfg['PRODUCT_LEVEL'], cfg['DATE'], None, cfg['PROD_VER'], None)
+    status = WriteOutputProduct(cfg, path.join(cfg['OUTDIR'], fout_name), dict(), [], None, None, "Fake history file", do_close=True)
+
+
+def WriteOutputProduct(cfg, file_out, gattr, dnames, dattr, rdata, outprod, official=False, do_close=False, rnames=None):
+    global WRITTEN_FILE, OUT_HDL
+    if cfg['EXTENSION'] is not None: outf = file_out + '.' + cfg['EXTENSION'] + '.h5'
+    else                           : outf = file_out + '.h5'
+
+    if rnames is None: rnames = dnames
+
+    if official: fattr = gattr
+    else       : fattr = GetCommonGlobalAttributes(cfg)
+
+    fattr['File_Name'] = path.split(outf)[1]
+    if cfg['VERBOSE'] > 1: print_writing_info(outprod, fattr['File_Name'])
+#    ret = 0
+    ret = outf
+
+    if cfg['SUBSET'] is None or rdata is None: data = rdata
+    else: data = map(lambda x: zeros((NL, NC), dtype=x.dtype), rdata)
+
+    if len(dnames) == 0:  # In case of fake history file 
+        cfg['PROD_MODE'] = False
+        fattr['Processing_Mode'] = 'ERR'
+
+    try:
+        if official: obj = f = h5py.File(outf, 'w')
+        else:
+            if WRITTEN_FILE is None:
+                f = h5py.File(outf, 'w')
+                # Set unofficial file attributes
+                for key, val in fattr.items(): SetH5Attribute(f, key, val)
+                WRITTEN_FILE, OUT_HDL = outf, f
+            elif WRITTEN_FILE != outf:
+                print "Error: bad output unofficial file name"
+                raise()
+            else: f = OUT_HDL
+            if not cfg['PROD_MODE'] : obj = f
+            else:
+                obj = f.create_group(gattr['ByProduct_Name'])
+
+        # Set global/group attributes
+        for key, val in gattr.items(): SetH5Attribute(obj, key, val)
+
+        if py_ifc.compression: compress, compress_opts = 'gzip', 5
+        else: compress, compress_opts = None, None
+
+        for ids in range(len(dnames)):
+
+            if dnames[ids] not in rnames: continue
+
+            # Complete dataset attributes
+            dattr[ids]['_FillValue'] = dattr[ids]['Missing_Output']
+
+            if cfg['SUBSET'] is not None:
+                data[ids][:] = dattr[ids]['_FillValue']
+                lth, shp = cfg['SUBSET_GRID'][0].size, cfg['SUBSET_GRID'][0].shape
+                data_ok = rdata[ids][:lth].reshape(shp)
+                if cfg['SUBSET_OUTPUT']: data[ids] = data_ok
+                else                   : data[ids][cfg['SUBSET_GRID']] = data_ok
+            else:
+                data[ids].shape = (py_ifc.msgpixy, py_ifc.msgpixx)
+                       
+            # Count filled and missing cells
+            nfill = where(data[ids] == dattr[ids]['_FillValue'])[0].size
+            if dattr[ids]['Missing_Output'] == dattr[ids]['_FillValue']: nmiss, nbad = nfill, nfill
+            else: 
+                nmiss = where(data[ids] == dattr[ids]['Missing_Output'])[0].size
+                nbad = nfill + nmiss
+            dattr[ids]['Num_Fill'], dattr[ids]['Num_Missing_Output'] = nfill, nmiss
+            dattr[ids]['Num_Valid'] = data[ids].size - nbad
+
+            # Create and fill dataset
+            dset = obj.create_dataset(dnames[ids], data[ids].shape, dtype=data[ids].dtype,
+                                      compression=compress, compression_opts=compress_opts)
+            dset[:] = data[ids]
+
+            # Set dataset attributes
+            for key, val in dattr[ids].items(): SetH5Attribute(dset, key, val)
+
+        if do_close:
+            f.close()
+            WRITTEN_FILE, OUT_HDL = None, None
+            # Fix h5py bug closing files and datasets
+            del f
+            try: del obj, f, dset
+            except: pass
+            gc.collect()
+
+    except: 
+        print "Error while writing " + file_out
+        raise
+#        ret = -1
+        ret = None
+    try: del dattr, data
+    except: pass
+    return ret
+
+
+def SetH5Attribute(obj, key, val):
+    if isinstance(val, set) and len(val) == 0: return
+    if isinstance(val, unicode): #test Modification no effect in python3 by Max
+        val = str(val)
+    if not isinstance(val, (str, list, tuple, dict, set)): val = val + 0 # Contrainte interface Fortran
+    obj.attrs.__setitem__(key, val)
