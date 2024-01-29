@@ -1,5 +1,6 @@
 compile:
-	cd src;make
+	#cd src;make
+	make -C src
 
 all:
 	make clear
