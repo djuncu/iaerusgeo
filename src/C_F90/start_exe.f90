@@ -1,16 +1,44 @@
-Subroutine start_exe(ProcessingStatus_p)
+Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
+        scatt_angs, aerosol_types_in_lut, rtm_switch, n_chnls_lut, n_aero, n_pfc,&
+        & n_sca, n_aod, ProcessingStatus_p)
    Use nr, Only: svdvar
    Use py_ifc
    Use algoconf
    Use start_mod
    Use brdfmodels
+   ! aerosol parameters contains:
+   ! ssa, g, eta, g_tilde, ssa_tilde
    Use aerosol_parameters
+   Use flotsam_interface
 
    Implicit None
 
    Integer(Kind=taokind) tmptaufrc
 
+   ! n_chnls_lut is the number of channels in LUT
+   ! N_channels is the number of channels being processed (can be smaller)
+
+   ! new vars for FLOTSAM integration
+   integer, intent(in) :: n_chnls_lut, n_aero, n_pfc, n_sca, n_aod
+   Real, intent(in), dimension(n_chnls_lut, n_aero, n_sca, n_aod) :: pf_smooth_lut, pf_raw_lut
+   Real, intent(in) :: pf_components_lut(n_chnls_lut, n_aero, n_pfc, n_aod)
+   Real, intent(in) :: ssa_lut(n_chnls_lut, n_aero, n_aod)
+   ! real type below should depend on FLOTSAM settings...
+   Real(8), intent(in) :: scatt_angs(n_sca)
+   Real, intent(in) :: aerosol_types_in_lut(n_aero)
+   integer, intent(in) :: rtm_switch
    Integer, Intent(Out) :: ProcessingStatus_p
+   real :: xi_test, sza, vza
+   Real, Dimension(1:N_AOD_max) :: phf_test
+   Real, Dimension(0:boxSize*boxSize*N_scenes-1) :: theta_sat_near_arr, theta_sol_near_arr
+
+   Real, dimension(n_chnls_lut, n_sca, n_aod) :: pf_raw_aero1, pf_raw_aero2, pf_raw_aero3
+   Real, dimension(n_chnls_lut, n_aod) :: ssa_aero1, ssa_aero2, ssa_aero3
+   Real, dimension(N_channels, n_sca, n_aod) :: pf_smooth_pix, pf_raw_pix
+   Real :: pf_components_pix(N_channels, n_pfc, n_aod) 
+   Real :: pf_smoo_pix_contiguous(n_sca,1), pf_cmp_pix_contiguous(n_pfc,1)
+   Real :: ssa_pix(N_channels, n_aod), pf_interp !, sca
+   integer :: i_aero_1, i_aero_2, i_aero_3, iprof, iband
 
    External reportLog, getStopStatus, stopping
 
@@ -23,6 +51,7 @@ Subroutine start_exe(ProcessingStatus_p)
 
    ! variables for date_and_time subroutine
    Integer :: day_of_year ! day of the year
+
 
    Real, Dimension(:, :), Allocatable :: F3_res
 
@@ -68,7 +97,7 @@ Subroutine start_exe(ProcessingStatus_p)
    Real    :: tau_0_tilde, tau_0_tilde_j, x1_tilde
    Real, Dimension(1:N_AOD_max) :: phFunc
    Real, Dimension(1:MaxNHistFiles) :: tau_in_hist
-   Real    :: TS, TV, Salb, trans_coeff, rho_1, R_MS, R_MS_us, R_MS_uv, us, uv, xi
+   Real    :: TS, TV, Salb, trans_coeff, rho_1, R_MS, R_MS_us, R_MS_uv, us, uv, xi, saa, vaa
    Integer :: cpt_tau, cpt_tau_conv, cpt_tau_max, counter
 
    Integer :: aer_type_1 = -1, aer_type_2 = -1, aer_type_3 = -1, aer_type_prev_1 = -1
@@ -90,6 +119,7 @@ Subroutine start_exe(ProcessingStatus_p)
    Integer                                                   :: cptX, cptX_final, NS, i_smooth
    Real, Dimension(0:boxSize*boxSize*N_scenes-1, 0:MM)       :: k_in_near, k_in_near_ ! a priori information for parameters
    Real, Dimension(0:boxSize*boxSize*N_scenes-1)             :: uv_near, us_near, ref_tol_near
+   Real, Dimension(0:boxSize*boxSize*N_scenes-1)             :: phi_sol_near_arr, phi_sat_near_arr
    Real, Dimension(0:boxSize*boxSize*N_scenes-1)             :: albed_b_in_near, albed_b_in_near_, ref_s_near, ref_s_near_
    Real, Dimension(0:boxSize*boxSize*N_scenes-1)             :: weight_near, xi_near
    Real, Dimension(0:boxSize*boxSize*N_scenes-1,1:N_AOD_max) :: phFunc_near
@@ -99,6 +129,9 @@ Subroutine start_exe(ProcessingStatus_p)
 
    Real :: ref_s, ref_s_, w_ref_s, w_ref_s_, ref_tol, ref_tol_j, ref_tol_out, fit_error, fit_error_force, jacobian
    Real, Dimension(1:N_AOD_max) :: P_tilde, P_tilde_j
+   
+   real :: sa_lm, ref_s_lm, ref_tol_lm
+   integer :: lm_counter
 
    Real :: jacoAOD, jacoAOD_thrs=0.2, conf_Meas = -1
 
@@ -413,7 +446,7 @@ Subroutine start_exe(ProcessingStatus_p)
 
       If (instantaneous) then
          print *, ' Instantaneous processing of ', Lines, ' lines'
-      Else
+        Else
          print *, ' Daily processing of ', Lines, ' lines'
       End If
 
@@ -449,6 +482,7 @@ Subroutine start_exe(ProcessingStatus_p)
          End If
 
          Do X = 1, MSGpixX
+            !print*, 'PROCESSING PIXEL ', X, Y
 
             ! Are coast pixels processed?
             if (.not. COAST_OK .and. coast_pix(X, Y) .eq. 1) Then
@@ -563,21 +597,118 @@ Subroutine start_exe(ProcessingStatus_p)
                STOP
             endif
 
-            ! Three possibilities with aerosol models
-            If (flag_aer_type_3) Then ! Three models exist
-               weight_mod_1 = 1.0 - weight_mod_2 - weight_mod_3
-               Call aerosol_parameters_init(aer_type_1,weight_mod_1,aer_type_2,weight_mod_2,aer_type_3,weight_mod_3)
-               aer_type_prev_1 = -1
-            Else If (flag_aer_type_2) Then ! Two models exist
-               weight_mod_1 = 1.0 - weight_mod_2
+            ! juncud:12Dec2023: need RTM switch here
+            ! switched the switches for testing...! should be 1->2
+            if (rtm_switch .eq. 1) then
+               ! Three possibilities with aerosol models
+               If (flag_aer_type_3) Then ! Three models exist
+                  weight_mod_1 = 1.0 - weight_mod_2 - weight_mod_3
+                  Call aerosol_parameters_init(aer_type_1,weight_mod_1,aer_type_2,weight_mod_2,aer_type_3,weight_mod_3)
+                  aer_type_prev_1 = -1
+               Else If (flag_aer_type_2) Then ! Two models exist
+                  weight_mod_1 = 1.0 - weight_mod_2
 !               Call aerosol_parameters_init(aer_type_1,weight_mod_1,aer_type_2,weight_mod_2,255,0.0)
-               Call aerosol_parameters_init(aer_type_1,weight_mod_1,aer_type_2,weight_mod_2,-1,0.0)
-               aer_type_prev_1 = -1
-            Else ! Mono-mode case
+                  Call aerosol_parameters_init(aer_type_1,weight_mod_1,aer_type_2,weight_mod_2,-1,0.0)
+                  aer_type_prev_1 = -1
+               Else ! Mono-mode case
 !               If (aer_type_1 .ne. aer_type_prev_1) Call aerosol_parameters_init(aer_type_1,1.0,255,0.0,255,0.0)
-               If (aer_type_1 .ne. aer_type_prev_1) Call aerosol_parameters_init(aer_type_1,1.0,-1,0.0,-1,0.0)
-               aer_type_prev_1 = aer_type_1
-            EndIf
+                  If (aer_type_1 .ne. aer_type_prev_1) Call aerosol_parameters_init(aer_type_1,1.0,-1,0.0,-1,0.0)
+                  aer_type_prev_1 = aer_type_1
+               EndIf
+            
+            else if (rtm_switch .eq. 2) then
+               !allocate(pf_raw_pix(N_channels, n_sca, n_aod))
+
+               ! Here we obtain 3 variables:
+               ! pf_smooth_pix, pf_components_pix, ssa_pix
+               !print*, 'Setting up phase functions'
+               
+               i_aero_1 = FINDLOC(aerosol_types_in_lut, aer_type_1, 1)
+               pf_raw_aero1 = RESHAPE(&
+                       pf_raw_lut(:, i_aero_1, :, :), &
+                       (/n_chnls_lut, n_sca, n_aod/) )
+               ssa_aero1 = RESHAPE(&
+                       ssa_lut(:, i_aero_1, :), &
+                       (/n_chnls_lut, n_aod/) )
+
+               If (flag_aer_type_3) Then ! Three models exist
+                  !print*, 'Mixing 3 aerosol models'
+                  i_aero_2 = FINDLOC(aerosol_types_in_lut, aer_type_2, 1)
+                  pf_raw_aero2 = RESHAPE(&
+                       pf_raw_lut(:, i_aero_2, :, :), &
+                       (/n_chnls_lut, n_sca, n_aod/) )
+                  ssa_aero2 = RESHAPE(&
+                       ssa_lut(:, i_aero_2, :), &
+                       (/n_chnls_lut, n_aod/) )
+                  i_aero_3 = FINDLOC(aerosol_types_in_lut, aer_type_3, 1)
+                  pf_raw_aero3 = RESHAPE(&
+                       pf_raw_lut(:, i_aero_3, :, :), &
+                       (/n_chnls_lut, n_sca, n_aod/) )
+                  ssa_aero3 = RESHAPE(&
+                       ssa_lut(:, i_aero_3, :), &
+                       (/n_chnls_lut, n_aod/) )
+                  weight_mod_1 = 1.0 - weight_mod_2 - weight_mod_3
+                  ! 1.mix aerosols in pf_raw
+                  call mix_aerosols(&
+                          pf_raw_aero1, ssa_aero1, weight_mod_1, &
+                          pf_raw_aero2, ssa_aero2, weight_mod_2, &
+                          pf_raw_aero3, ssa_aero3, weight_mod_3, &
+                          ! allocate & deallocate pf_raw_pix
+                          pf_raw_pix, ssa_pix, n_chnls_lut, n_sca, n_aod)
+                  ! 2.calculate pf's with flotsam analyse_phase_function
+                  call prepare_phase_functions_flotsam(&
+                          scatt_angs, pf_raw_pix, n_pfc, pf_smooth_pix, pf_components_pix, &
+                          n_sca, n_aod, N_channels)
+                  !Call aerosol_parameters_init(aer_type_1,weight_mod_1,aer_type_2,weight_mod_2,aer_type_3,weight_mod_3)
+                  !aer_type_prev_1 = -1
+              Else If (flag_aer_type_2) Then ! Two models exist
+                  !print*, 'Mixing 2 aerosol models'
+                  i_aero_2 = FINDLOC(aerosol_types_in_lut, aer_type_2, 1)
+                  pf_raw_aero2 = RESHAPE(&
+                       pf_raw_lut(:, i_aero_2, :, :), &
+                       (/n_chnls_lut, n_sca, n_aod/) )
+                  ssa_aero2 = RESHAPE(&
+                       ssa_lut(:, i_aero_2, :), &
+                       (/n_chnls_lut, n_aod/) )
+
+                  ! passing 1st index as dummy input with weight=0
+                  pf_raw_aero3 = RESHAPE(&
+                       pf_raw_lut(:, 1, :, :), &
+                       (/n_chnls_lut, n_sca, n_aod/) )
+                  ssa_aero3 = RESHAPE(&
+                       ssa_lut(:, 1, :), &
+                       (/n_chnls_lut, n_aod/) )
+
+                  weight_mod_1 = 1.0 - weight_mod_2
+                  ! 1.mix aerosols in pf_raw
+                  call mix_aerosols(&
+                          pf_raw_aero1, ssa_aero1, weight_mod_1, &
+                          pf_raw_aero2, ssa_aero2, weight_mod_2, &
+                          pf_raw_aero3, ssa_aero3, weight_mod_3, &
+                          ! allocate & deallocate pf_raw_pix (maybe not necessary?)
+                          pf_raw_pix, ssa_pix, n_chnls_lut, n_sca, n_aod)
+                  ! 2.calculate pf's with flotsam analyse_phase_function
+                  call prepare_phase_functions_flotsam(&
+                          scatt_angs, pf_raw_pix, n_pfc, pf_smooth_pix, pf_components_pix, &
+                          n_sca, n_aod, N_channels)
+!               Call aerosol_parameters_init(aer_type_1,weight_mod_1,aer_type_2,weight_mod_2,255,0.0)
+                 ! Call aerosol_parameters_init(aer_type_1,weight_mod_1,aer_type_2,weight_mod_2,-1,0.0)
+                  ! aer_type_prev_1 = -1
+              Else ! Mono-mode case
+                  !print*, 'Pure aerosol model, type ', i_aero_1
+                  ! use pf_smooth, pf_components and ssa from given LUT's
+                  do I = 1, N_channels
+                     pf_smooth_pix(I,:,:) = pf_smooth_lut(I, i_aero_1, :, :)
+                     pf_components_pix(I,:,:) = pf_components_lut(I, i_aero_1, :, :)
+                     ssa_pix(I,:) = ssa_lut(I, i_aero_1, :)
+                  end do
+!               If (aer_type_1 .ne. aer_type_prev_1) Call aerosol_parameters_init(aer_type_1,1.0,255,0.0,255,0.0)
+                  !If (aer_type_1 .ne. aer_type_prev_1) Call aerosol_parameters_init(aer_type_1,1.0,-1,0.0,-1,0.0)
+                  !aer_type_prev_1 = aer_type_1
+              EndIf
+               !print*, 'Finished setting up phase functions'
+            end if
+
 
             AOD_max = AOD_max_steps(N_AOD_max) ! 3.0 in the current version
             AOD_min = AOD_max_steps(1) ! 0.0 in the current version
@@ -707,6 +838,12 @@ Subroutine start_exe(ProcessingStatus_p)
 
                ! loop over channels
                Do I = 1, N_channels
+                  ! init flotsam channel  
+                  if (rtm_switch .eq. 2) then                     
+                     ! structure for holding information about a particular satellite
+                     ! channel
+                     call init_flotsam_channel()                     
+                  endif
 
                   debug_flag = .false.
 !                  if ((I .eq. 1) .and. (Y .eq. 5)) debug_flag = .true.
@@ -801,7 +938,7 @@ Subroutine start_exe(ProcessingStatus_p)
                      Else
                         previous = .false.
                      End If
-
+                     
                      ! if previous estimate is available read parameter vector and covariance matrix
                      If (previous) Then
 
@@ -918,14 +1055,13 @@ Subroutine start_exe(ProcessingStatus_p)
 
                      !************************************************************************
                      ! perform calculation if observations and/or previous estimate are available
-                     If ((observations_i .or. observations_d) .or. previous) Then
-
+                     If ((observations_i .or. observations_d) .or. previous) Then       
                         if (instantaneous) then
-!!$ BEG inst_estimates
+!!$ BEG inst_estimates     
                            ! INST inversion is made if there are enough observations
                            If (observations_i) Then
                               ! INST inversion is made if a priori is available
-                              If (previous) Then
+                                 If (previous) Then
                                  ! A priori must be different from climatology over land (not over ocean since reflectance is forced)
                                  If (.not. (flag_kinIsClimato .and. land_flag)) Then
 
@@ -933,7 +1069,7 @@ Subroutine start_exe(ProcessingStatus_p)
                                     If (age_obs_in(X, Y, 1, I) .gt. 25) quality(X, Y, I) = 114
 
                                     If (smooth_flag) Then ! spatiotemporal smoothing
-                                       X_X(:) = -1
+                                           X_X(:) = -1
                                        Y_Y(:) = -1
                                        if (fullDisk) Then ! full disk
                                           ! nearest pixels in boxSize x boxSize box
@@ -973,6 +1109,8 @@ Subroutine start_exe(ProcessingStatus_p)
                                        ! initialisation for spatiotemporal average
                                        uv_near(:) = -1.
                                        us_near(:) = -1.
+                                       phi_sat_near_arr(:) = -1.
+                                       phi_sol_near_arr(:) = -1.
                                        phFunc_near(:,:) = -1.
                                        ref_tol_near(:) = -1.
                                        ref_s_near(:) = -1.
@@ -982,6 +1120,8 @@ Subroutine start_exe(ProcessingStatus_p)
                                        weight_near(:) = -1.
                                        xi_near(:) = -1.
                                        valid_near(:) = .false.
+                                       theta_sat_near_arr(:) = -1.
+                                       theta_sol_near_arr(:) = -1.
 
                                        ! Check valid obs                                       
                                        i_smooth = -1
@@ -1029,6 +1169,8 @@ Subroutine start_exe(ProcessingStatus_p)
 !                                                If (phi_sol_near .gt. two_pi) phi_sol_near = two_pi
                                                 phi_sat_near   = modulo((azimuth_sat(X_X(NS),Y_Y(NS),N)+Offset_VAA(N) ) / Scale_VAA(N) * rad - two_pi, two_pi)
                                                 phi_sol_near   = modulo((azimuth_sol(X_X(NS),Y_Y(NS),N)+Offset_SAA(N) ) / Scale_SAA(N) * rad - two_pi, two_pi)
+                                                phi_sol_near_arr(i_smooth) = phi_sol_near
+                                                phi_sat_near_arr(i_smooth) = phi_sat_near
                                                 phi_del_near   = phi_sat_near - phi_sol_near
                                                 If (phi_del_near .lt. 0.) phi_del_near = phi_del_near + two_pi
                                                 If (phi_del_near .gt. pi) phi_del_near = two_pi - phi_del_near
@@ -1037,6 +1179,16 @@ Subroutine start_exe(ProcessingStatus_p)
                                                 uv_near(i_smooth) = Cos(theta_sat_near)
                                                 us_near(i_smooth) = Cos(theta_sol_near)
                                                 xi_near(i_smooth) = pi-Acos(Cos(theta_sat_near)*Cos(theta_sol_near)+Sin(theta_sat_near)*Sin(theta_sol_near)*Cos(phi_del_near))
+                                                theta_sat_near_arr(i_smooth) = theta_sat_near
+                                                theta_sol_near_arr(i_smooth) = theta_sol_near
+                                                
+                                                ! the flotsam xi is very close to the one that is 
+                                                ! calcualted here, so can use that one.
+                                                !call calc_flotsam_xi(&
+                                                !   phi_sol_near, phi_sat_near,&
+                                                !   us_near(i_smooth), uv_near(i_smooth), &
+                                                !   xi_test)
+                                                !print*, 'XI OLD / FLOTSAM: ', xi_near(i_smooth), xi_test
 
                                                 ! checking that xi is lower than 'xi_trunc'
                                                 if (xi_near(i_smooth) .le. xi_trunc) Then
@@ -1151,6 +1303,8 @@ Subroutine start_exe(ProcessingStatus_p)
                                        ! variables needed for INST retrieval
                                        uv = 0.
                                        us = 0.
+                                       vaa = 0.
+                                       saa = 0.
                                        ref_s = 0.
                                        ref_s_ = 0.
                                        ref_tol = 0.
@@ -1159,6 +1313,8 @@ Subroutine start_exe(ProcessingStatus_p)
                                        albed_b_in_ = 0.
                                        xi = 0.
                                        weight_near_sum = 0.
+                                       sza = 0.
+                                       vza = 0.
 
                                        ! Spatiotemporal average using ref_tol as weight
                                        i_smooth = -1
@@ -1182,6 +1338,8 @@ Subroutine start_exe(ProcessingStatus_p)
                                                 ! weighted mean
                                                 uv = uv + uv_near(i_smooth)*weight_near(i_smooth)
                                                 us = us + us_near(i_smooth)*weight_near(i_smooth)
+                                                vaa = vaa + phi_sat_near_arr(i_smooth)*weight_near(i_smooth)
+                                                saa = saa + phi_sol_near_arr(i_smooth)*weight_near(i_smooth)
                                                 ref_s = ref_s + ref_s_near(i_smooth)*weight_near(i_smooth)
                                                 ref_s_ = ref_s_ + ref_s_near_(i_smooth)*weight_near(i_smooth)
                                                 ref_tol = ref_tol + ref_tol_near(i_smooth)*weight_near(i_smooth)
@@ -1189,6 +1347,8 @@ Subroutine start_exe(ProcessingStatus_p)
                                                 albed_b_in = albed_b_in + albed_b_in_near(i_smooth)*weight_near(i_smooth)
                                                 albed_b_in_ = albed_b_in_ + albed_b_in_near_(i_smooth)*weight_near(i_smooth)
                                                 xi = xi + xi_near(i_smooth)*weight_near(i_smooth)
+                                                vza = vza + theta_sat_near_arr(i_smooth)*weight_near(i_smooth)
+                                                sza = sza + theta_sol_near_arr(i_smooth)*weight_near(i_smooth)
 
                                                 ! sum of weights
                                                 weight_near_sum = weight_near_sum + weight_near(i_smooth)
@@ -1198,6 +1358,8 @@ Subroutine start_exe(ProcessingStatus_p)
                                        End Do
                                        uv = uv / weight_near_sum
                                        us = us / weight_near_sum
+                                       vaa = vaa / weight_near_sum
+                                       saa = saa / weight_near_sum
                                        ref_s = ref_s / weight_near_sum
                                        ref_s_ = ref_s_ / weight_near_sum
                                        ref_tol = ref_tol / weight_near_sum
@@ -1205,18 +1367,36 @@ Subroutine start_exe(ProcessingStatus_p)
                                        albed_b_in = albed_b_in / weight_near_sum
                                        albed_b_in_ = albed_b_in_ / weight_near_sum
                                        xi = xi / weight_near_sum
+                                       vza = vza / weight_near_sum
+                                       sza = sza / weight_near_sum
+
+                                       ! juncud:11Jan2024 
+                                       ! testing calculations of xi and phf
+                                       ! -> in the future, xi_test should be used by
+                                       ! FLOTSAM, and phf_test should be used by MSA
+                                       xi_test = &
+                                          pi-Acos(uv*us+Sin(vza)*Sin(sza)*Cos(vaa-saa))
+                                       phf_test = phaseFunc_value(xi_test,I)
+                                       !print*, 'XI ORIG VS XI NEW: ', xi, xi_test
+                                       !print*, 'PHF ORIG VS PHF NEW: ', phFunc(8), phf_test(8)
+
+                                       ! TESTING if this makes a difference
+                                       ! answer: it does -> test gave 5% MRE for AOD retrieval
+                                       !phFunc = phf_test
 
                                     Else ! .not. smooth_flag
 
                                        uv = Cos(theta_sat(1))
                                        us = Cos(theta_sol(1))
+                                       vaa = phi_sat(1)
+                                       saa = phi_sol(1)
                                        If (ocean_flag .and. coast_pix(X, Y) .ne. 1) k_in(0) = albed_force_ocean
                                        If (ocean_flag .and. coast_pix(X, Y) .ne. 1) k_in_(0) = albed_force_ocean
                                        ref_s_ = dot_product(brdfmodel(theta_sat(1), theta_sol(1), phi_sat(1), phi_sol(1), phi_del(1), &
                                           & wspeed(1), wdir(1), I, model, ocean_flag, .True.), k_in_(0:2))
                                        ref_s = dot_product(brdfmodel(theta_sat(1), theta_sol(1), phi_sat(1), phi_sol(1), phi_del(1), &
                                           & wspeed(1), wdir(1), I, model, ocean_flag, .False.), k_in(0:2))
-                                       ref_tol = refl(1)
+                                       ref_tol = refl(1)                     
                                        phFunc = phaseFunc_value(scat_ang(1),I)
                                        albed_b_in_ = Dot_Product(k_in_, bihi_calc)
                                        If (ocean_flag .and. coast_pix(X, Y) .ne. 1) albed_b_in_ = albed_force_ocean
@@ -1287,47 +1467,96 @@ Subroutine start_exe(ProcessingStatus_p)
                                     endif
 
                                     ! Calling instantaneous retrieval method
-                                    call LM(Sa_val**(1.+ref_s), g_tilde(:,I), ssa(:,I), ssa_tilde(:,I), eta(:,I), &
-                                       & uv, us, phFunc, ref_tol, ref_tol_out, ref_s, albed_b_in, &
-                                       & tau_force, tau_0, jacoAOD, AOD_max_steps, debug_flag)
+                                    !print*, 'BEFORE LM - ', X, Y
+                                    !print*, N, N_scenes
 
-                                    ! if AOD is slightly negative we invert again with a higher weight for a priori
-                                    if (tau_0 .le. 0.0) Then
-                                       call LM(Sa_val**(1.+ref_s)/10.0, g_tilde(:,I), ssa(:,I), ssa_tilde(:,I), eta(:,I), &
-                                          & uv, us, phFunc, ref_tol, ref_tol_out, ref_s, albed_b_in, &
-                                          & tau_force, tau_0, jacoAOD, AOD_max_steps, debug_flag)
+                                    sa_lm = Sa_val**(1.+ref_s)
+                                    ref_s_lm = ref_s
+                                    ref_tol_lm = ref_tol
+                                    lm_counter = 1
+                                    ! test if this call is working
+                                    !print*, pf_interp, vaa, saa
+                                    !print*, ssa_pix(1,:)
 
-                                       ! higher AP weight if it did not work either
-                                       if (tau_0 .le. 0.0) Then
-                                          call LM(Sa_val**(1.+ref_s)/50.0, g_tilde(:,I), ssa(:,I), ssa_tilde(:,I), eta(:,I), &
-                                             & uv, us, phFunc, ref_tol, ref_tol_out, ref_s, albed_b_in, &
-                                             & tau_force, tau_0, jacoAOD, AOD_max_steps, debug_flag)
+                                    do while ((tau_0 .le. 0.0 .or. isnan(tau_0)) .and. lm_counter .lt. 6)
+                                       ! i could probably move prepare_...
+                                       ! out of (before) the loop
+                                       ! if I free iband, iprof only
+                                       ! after this loop (currently freed in LM_flotsam)
+                                       !call prepare_ref_tol_flotsam(&                    
+                                       !   I-1, &                            
+                                       !   !Cos(theta_sol(N)),Cos(theta_sat(N)),& 
+                                       !   ! are these the correct angles...?
+                                       !   us, uv, saa, vaa, &
+                                       !   sca, iband, iprof, & ! right order?
+                                       !   n_sca, n_pfc, 1, 1 )
+                                       !print*, 'FLOTSAM PREPARED'
+                                       !print*, '(RE)CALC LM'
+                                       if (rtm_switch .eq. 2) then
+                                       
+                                          call LM_flotsam(&
+                                            sa_lm, ssa_pix, & 
+                                            uv, us, &
+                                            saa, vaa, xi, &
+                                            ref_tol_lm, ref_tol_out, ref_s_lm, &
+                                            tau_force, tau_0, jacoAOD, AOD_max_steps,&
+                                            debug_flag, &
+                                            pf_smooth_pix, pf_components_pix, &
+                                            I, 1, n_sca, n_aod, n_pfc)
+                                          !print*, 'TAU FLOTSAM: ', tau_0, jacoAOD
+                                       else if (rtm_switch .eq. 1) then
+                                          call LM(&
+                                             sa_lm, g_tilde(:,I), ssa(:,I), &
+                                             ssa_tilde(:,I), eta(:,I), &
+                                             uv, us, phFunc, ref_tol_lm, ref_tol_out,&
+                                             ref_s_lm, &
+                                             albed_b_in, &
+                                             tau_force, tau_0, jacoAOD, AOD_max_steps, debug_flag)
+                                          !print*, 'TAU MSA: ', tau_0, jacoAOD
+                                       endif
 
-                                          ! try again with lower surface reflectance if it did not work either
-                                          if (tau_0 .le. 0.0) Then
-                                             call LM(Sa_val**(1.+ref_s)/50.0, g_tilde(:,I), ssa(:,I), ssa_tilde(:,I), eta(:,I), &
-                                                & uv, us, phFunc, ref_tol, ref_tol_out, ref_s*0.85, albed_b_in, &
-                                                & tau_force, tau_0, jacoAOD, AOD_max_steps, debug_flag)
-                                             if (tau_0 .gt. AOD_min .and. tau_0 .lt. AOD_max) quality(X, Y, I) = 120
-                                          Else
-                                             if (tau_0 .gt. AOD_min .and. tau_0 .lt. AOD_max) quality(X, Y, I) = 118
-                                          EndIf
-                                       Else
-                                          if (tau_0 .gt. AOD_min .and. tau_0 .lt. AOD_max) quality(X, Y, I) = 116
-                                       EndIf
-                                    endif
+                                        if (lm_counter .eq. 1) then
+                                           ! if AOD is slightly negative we invert again with
+                                           ! a higher weight for a priori
+                                           sa_lm = sa_lm / 10.
+                                        else if (lm_counter .eq. 2) then
+                                           if (tau_0 .gt. AOD_min .and. tau_0 .lt. AOD_max) then
+                                              quality(X, Y, I) = 116
+                                           end if
+                                           ! higher AP weight if it did not work either
+                                           sa_lm = sa_lm / 5.
+                                        else if (lm_counter .eq. 3) then
+                                           if (tau_0 .gt. AOD_min .and. tau_0 .lt. AOD_max) then
+                                              quality(X, Y, I) = 118
+                                           end if
+                                           ! try again with lower surface reflectance if
+                                           ! it did not work either
+                                           ref_s_lm = ref_s_lm * 0.85
+                                        else if (lm_counter .eq. 4) then
+                                           if (tau_0 .gt. AOD_min .and. tau_0 .lt. AOD_max) then
+                                              quality(X, Y, I) = 120
+                                           else if (ocean_flag .and. (ref_tol .gt. -0.1) .and. &
+                                             (ref_tol .le. 0.0) .and. (tau_0 .le. 0.0)) then
+                                              ! repeat inversion if AOD over ocean is negative
+                                              ! due to negative values of ref_TOL
+                                              sa_lm = sa_lm * 5. 
+                                              ref_tol_lm = 0.
+                                           else
+                                             ! if bad tau, but not over ocean we skip the last try
+                                             EXIT 
+                                           end if 
+                                        else if (lm_counter .eq. 5) then   
+                                          if (tau_0 .gt. AOD_min .and. tau_0 .lt. AOD_max) then 
+                                             quality(X, Y, I) = 122
+                                          end if
+                                        end if                                        
+                                       lm_counter = lm_counter + 1
+                                    end do
 
-                                    ! repeat inversion if AOD over ocean is negative due to negative values of ref_TOL
-                                    if (ocean_flag .and. (ref_tol .gt. -0.1) .and. (ref_tol .le. 0.0) .and. (tau_0 .le. 0.0)) Then
-                                       call LM(Sa_val**(1.+ref_s)/10.0, g_tilde(:,I), ssa(:,I), ssa_tilde(:,I), eta(:,I), &
-                                          & uv, us, phFunc, 0.0, ref_tol_out, ref_s, albed_b_in, &
-                                          & tau_force, tau_0, jacoAOD, AOD_max_steps, debug_flag)
-
-                                       if (tau_0 .gt. AOD_min .and. tau_0 .lt. AOD_max) quality(X, Y, I) = 122
-                                    endif
-
+                                    !print*, 'PIXEL PROCESSED. TAU / No. LM: ', tau_0, lm_counter-1
                                     ! checking the robustness of the solution and removing extrema (AOD=AOD_min and AOD=AOD_max)
-                                    if (tau_0 .ge. AOD_max .or. tau_0 .le. AOD_min) Then
+                                    if (tau_0 .ge. AOD_max .or. tau_0 .le. AOD_min .or. isnan(tau_0)) Then
+                                       !print*, 'BAD PIXEL VAL: ', tau_0, lm_counter-1, ref_s
                                        tau_0 = tau_badValue
                                        quality(X, Y, I) = 75
                                     Else
@@ -1633,6 +1862,7 @@ Subroutine start_exe(ProcessingStatus_p)
                                     if (aod_pos_j .gt. N_AOD_max) aod_pos_j = N_AOD_max
                                     tau_0_tilde_j = (1.-ssa(aod_pos_j,I)*eta(aod_pos_j,I))*(k(3)+delta_tau)
 
+                                    ! this whole loop is unnecessary if I understand correctly?
                                     fit_error = 0.
                                     jacobian = 0.
                                     counter = 0
@@ -1641,24 +1871,46 @@ Subroutine start_exe(ProcessingStatus_p)
                                           ref_s = dot_product(brdfmodel(theta_sat(N), theta_sol(N), phi_sat(N), phi_sol(N), phi_del(N), &
                                              & wspeed(N), wdir(N), I, model, ocean_flag, .False.), k(0:2))
                                           P_tilde = phaseFunc_value(scat_ang(N),I)/(1.-eta(aod_pos,I))
-                                          call calculate_ref_tol(ref_s, P_tilde(aod_pos), ssa_tilde(aod_pos,I), &
-                                             & g_tilde(aod_pos,I), tau_0_tilde, albed_b_in, &
-                                             & Cos(theta_sat(N)), Cos(theta_sol(N)), ref_tol)
+                                          print*, 'DAILY FLOTSAM REFL'
+                                          !print*, k(3), I, aod_pos, i_aero_1
+                                          ! question: do we pass k(3) as AOD here?
+                                          pf_cmp_pix_contiguous = reshape(&
+                                                  pf_components_pix(I,:,aod_pos),&
+                                                  (/n_pfc,1/))
+                                          pf_smoo_pix_contiguous = reshape(&
+                                                  pf_smooth_pix(I,:,aod_pos),&
+                                                  (/n_sca,1/))
+                                          !print*, pf_cmp_pix_contiguous
+                                          !print*, pf_smoo_pix_contiguous
+
+                                          !call calculate_ref_tol_flotsam(&
+                                          !        I-1, pf_smoo_pix_contiguous,&
+                                          !        pf_cmp_pix_contiguous,&
+                                          !        ssa_pix(I,aod_pos), ref_s, k(3), &
+                                          !        Cos(theta_sol(N)),Cos(theta_sat(N)),&
+                                          !        phi_sol(N), phi_sat(N), ref_tol, &
+                                          !        n_sca, n_pfc, 1, 1 )
+                                            !ref_s, P_tilde(aod_pos), ssa_tilde(aod_pos,I), &
+                                            ! & g_tilde(aod_pos,I), tau_0_tilde, albed_b_in, &
+                                            ! & Cos(theta_sat(N)), Cos(theta_sol(N)), ref_tol)
                                           fit_error = fit_error + abs(refl(N)-ref_tol)
+                                          print*, 'TOL REF: ', ref_tol
 
                                           P_tilde_j = phaseFunc_value(scat_ang(N),I)/(1.-eta(aod_pos_j,I))
-                                          call calculate_ref_tol(ref_s, P_tilde_j(aod_pos_j), ssa_tilde(aod_pos_j,I), &
-                                              & g_tilde(aod_pos_j,I), tau_0_tilde_j, albed_b_in, &
-                                              & Cos(theta_sat(N)), Cos(theta_sol(N)), ref_tol_j)
+                                          ! The second call to calculate_ref_tol is unnecessary
+                                          ! according to Xavier
+                                          !call calculate_ref_tol(ref_s, P_tilde_j(aod_pos_j), ssa_tilde(aod_pos_j,I), &
+                                          !    & g_tilde(aod_pos_j,I), tau_0_tilde_j, albed_b_in, &
+                                          !    & Cos(theta_sat(N)), Cos(theta_sol(N)), ref_tol_j)
  
-                                          jacobian = jacobian + ABS(ref_tol_j-ref_tol)/delta_tau
+                                          !jacobian = jacobian + ABS(ref_tol_j-ref_tol)/delta_tau
 
                                           counter = counter+1
                                        End If
                                     End Do
 
-                                    if (debug_flag) print *, '     i: k - Ck_ite(3,3) ; error ; jacobian: ', &
-                                            & cpt_tau, ':', k, '-', Ck_ite(3, 3), ';', fit_error/counter, ';', jacobian/counter
+                                    !if (debug_flag) print *, '     i: k - Ck_ite(3,3) ; error ; jacobian: ', &
+                                    !        & cpt_tau, ':', k, '-', Ck_ite(3, 3), ';', fit_error/counter, ';', jacobian/counter
 
                                     ! AOD must remain between AOD_min and AOD_max
                                     if (k(3) .gt. AOD_max) k(3) = AOD_max

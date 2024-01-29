@@ -1,4 +1,4 @@
-#!/usr/local/bin/python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 ###################################################################################################
@@ -17,6 +17,10 @@
 ###################################################################################################
 
 
+from __future__ import print_function
+from __future__ import division
+#from builtins import map
+#from builtins import str
 from datetime import *
 import os
 from tempfile import mkdtemp
@@ -49,7 +53,7 @@ NetCDF_, HDF4_, HDF5_ = (0, 1, 2)
 HDF_ = HDF4_
 OUTFILE_EXTENSION = ['nc', 'hdf', 'h5']
 
-HDF5_SIGNATURE = '\x89HDF\r\n\x1a\n'
+HDF5_SIGNATURE = b'\x89HDF\r\n\x1a\n'
 
 EXIT_CODE_WRN = 127
 EXIT_CODE_ERR =   1
@@ -61,11 +65,11 @@ def ReadDatedInfoTextFile(cfg, txt_file, label):
     try:
         f = open(txt_file, 'r')
         try:
-            lines = filter(lambda x: x[0] != '#' and len(x.strip()) > 0, f.readlines())
-            info_cfg = map(lambda x:x.split(), lines)
-            for info in info_cfg: info[0], info[1] = map(lambda x:FromIcareHdfFullUTC(x), info[:2])
+            lines = [x for x in f.readlines() if x[0] != '#' and len(x.strip()) > 0]
+            info_cfg = [x.split() for x in lines]
+            for info in info_cfg: info[0], info[1] = [FromIcareHdfFullUTC(x) for x in info[:2]]
         except:
-            print "Error while reading " + label +  "file."
+            print("Error while reading " + label +  "file.")
         f.close()
     except:
         pass
@@ -95,13 +99,13 @@ def ReadConfigFile(fpath, ordered=False, sep='=', err=True, add=False):
             key = name.strip()
 #            d[key] = value.strip().strip('\n')
             if add:
-                if not d.has_key(key): d[key] = []
+                if key not in d: d[key] = []
                 d[key].append(value.strip().strip('\n'))
             else: d[key] = value.strip().strip('\n')
             l = ''
         fcfg.close()
     except:
-        if err: print "Error reading configuration file " + fpath
+        if err: print("Error reading configuration file " + fpath)
         d = None
     return d
 
@@ -110,11 +114,11 @@ def WriteConfigFile(path, d):
     status = 0
     try:
         fcfg = open(path, 'w')
-        for k in d.keys():
+        for k in list(d.keys()):
             fcfg.write("%s = %s\n" %(k, str(d[k])))
         fcfg.close()
     except:
-        print 'Error writing file ' + path
+        print('Error writing file ' + path)
         status = -1
     return status
 
@@ -133,7 +137,8 @@ def GetHDF5Version(): return h5py.version.hdf5_version
 
 
 def IsH5File(fpath):
-    f = open(fpath, 'r')
+    # changed 'r' to 'rb' during porting to py3
+    f = open(fpath, 'rb')
     signature = f.read(len(HDF5_SIGNATURE))
     f.close()
     return signature == HDF5_SIGNATURE
@@ -211,9 +216,9 @@ def IcareDateTimeAttrComment(microseconds = False, begin = '',
     return IcareAttributeComment(begin, header, text, end)
 
 def IcareGeoCenteredGridComment(prj_lon, nbl, nbc, begin = '', header = 'Centered_Grid', end = '.'):
-    inc = nbl - 2*(nbl/2)
-    str = [ 'at the center of %dth row and column' % (nbl/2 + 1),
-            'halfway between %dth and %dth row and column' % (nbl/2 + inc , nbl/2 + inc + 1) ]
+    inc = nbl - 2*(nbl//2)
+    str = [ 'at the center of %dth row and column' % (nbl//2 + 1),
+            'halfway between %dth and %dth row and column' % (nbl//2 + inc , nbl//2 + inc + 1) ]
     if inc : str.reverse()
     text = ('indicates whether the projection center (latitude: 0.0, longitude: %.1f) is located at the center of the SDS grid; ' + \
         '1 = centered, i.e. projection center ' + str[1] + '; 0 = not centered, i.e. projection center ' + str[0]) % prj_lon
@@ -318,9 +323,9 @@ def IcarePath2(path):
 def MakeNewDir(path):
     try:
         os.makedirs(path)
-    except OSError, erreur:
+    except OSError as erreur:
         if erreur.errno != EEXIST:
-            print "Error making %s dir." % path
+            print("Error making %s dir." % path)
             return False
     return True
 
@@ -329,9 +334,9 @@ def MakeTmpDir(path, prefix):
     try:
         tmpdir = mkdtemp(prefix=prefix, dir=path)
         os.makedirs(tmpdir)
-    except OSError, erreur:
+    except OSError as erreur:
         if erreur.errno != EEXIST:
-            print "Error making temporary directory."
+            print("Error making temporary directory.")
             tmpdir = None
     return tmpdir
 

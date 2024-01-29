@@ -1,6 +1,10 @@
-#!/usr/local/bin/python
+#!/usr/bin/env python3
+
 # -*- coding: utf-8 -*-
 
+
+from __future__ import print_function
+from __future__ import division
 import os
 from os import _exit, path
 
@@ -11,7 +15,7 @@ from numpy import *
 try:
     from pyhdf.SD import *
 except:
-    print "ERROR loading pyhdf"
+    print("ERROR loading pyhdf")
     pass
 
 from datetime import *
@@ -48,8 +52,9 @@ GEO_ECL_DT0 = datetime(1999,12,31) ## Base date for sun elements approximation
 H_PLANCK = 6.6260688e-34   ## Planck constant   (J.s)
 C_LIGHT  = 2.997924580e8   ## Light celerity    (m/s)
 K_BOLTZ  = 1.3806503e-23   ## Boltzman constant (J/K)
-PLANCK_C1 = 2.*H_PLANCK*C_LIGHT*C_LIGHT*1.e+11;
-PLANCK_C2 = 100*H_PLANCK*C_LIGHT/K_BOLTZ;
+
+PLANCK_C1 = 2.*H_PLANCK*C_LIGHT*C_LIGHT*1.e+11
+PLANCK_C2 = 100.*H_PLANCK*C_LIGHT/K_BOLTZ
 
 
 def GetConfig(cfg_in, path):
@@ -118,7 +123,7 @@ def GeoEclipseDates(dt0, satlon):
 ##  Eclipse duration
     try:
         ts = degrees(arccos(sqrt(1 - (C_REQU/C_HSAT)**2)/cos(Decl)))/7.5
-        return (dt - timedelta(hours=ts/2), dt + timedelta(hours=ts/2))
+        return (dt - timedelta(hours=ts/2.), dt + timedelta(hours=ts/2))
     except (ValueError, RuntimeWarning):
         # No eclipse...
         return None
@@ -166,7 +171,7 @@ def GeoEclipseDatesOld(dt0, satlon):
 ##  Eclipse duration
     try:
         ts = degrees(arccos(sqrt(1 - (C_REQU/C_HSAT)**2)/cos(Decl)))/7.5
-        return (dt - timedelta(hours=ts/2), dt + timedelta(hours=ts/2))
+        return (dt - timedelta(hours=ts/2), dt + timedelta(hours=ts/2.))
     except ValueError :
         # No eclipse...
         return None
@@ -252,7 +257,7 @@ def LatLon2LinColBis_(lat, lon, ssplon, centered, cfac, coff, lfac, loff, sweepx
     ad2 = r1*r1 + r2*r2 + r3*r3/C_RR2
     bd = C_HSAT*r1;
     delta2 = bd*bd - ad2*C_MVD2;
-    halfsom = bd*rn/ad2;
+    halfsom = bd*rn/ad2
 
     if not isinstance(lat, ndarray):
         if (delta2 < 0 or  rn > halfsom): return (-1, -1)
@@ -297,7 +302,7 @@ def LatLon2LinCol_(lat, lon, ssplon, centered, cfac, coff, lfac, loff, sweepx=0,
     ad2 = r1*r1 + r2*r2 + r3*r3/C_RR2
     bd = C_HSAT*r1;
     delta2 = bd*bd - ad2*C_MVD2;
-    halfsom = bd*rn/ad2;
+    halfsom = bd*rn/ad2
 
     lin, col = err*ones(rlat.shape, dtype=int), err*ones(rlon.shape, dtype=int)
 
@@ -326,7 +331,7 @@ def GeoSetLinColBounds(geo, zone):
 
 
 def EarthLatRadius(lat):
-    return C_RPOL / sqrt( 1 - cos(radians(float_(lat)))**2 * (1 - (C_RPOL/C_REQU)**2))
+    return C_RPOL/ sqrt( 1 - cos(radians(float_(lat))**2 * (1 - (C_RPOL/C_REQU)**2)))
 
 
 def GeodeticAngle(lon0, lat0, lon1, lat1):
@@ -343,7 +348,7 @@ def GeodeticAngle(lon0, lat0, lon1, lat1):
 
 
 def GeoDist(lon0, lat0, lon1, lat1):
-    try: return GeodeticAngle(lon0, lat0, lon1, lat1)*(EarthLatRadius(lat0) + EarthLatRadius(lat1))/2
+    try: return GeodeticAngle(lon0, lat0, lon1, lat1)*(EarthLatRadius(lat0) + EarthLatRadius(lat1))/2.
     except: return -1.
 
 
@@ -441,11 +446,11 @@ def AbsoluteLongitude(lon, lon0): return RelativeLongitude(lon, -lon0)
 
 def CheckInterval(interval, verb=True, sens=True):
     if   not isinstance(interval, list):
-        if verb: print 'This is not a sequence:' , interval
+        if verb: print('This is not a sequence:' , interval)
     elif len(interval) != 2            :
-        if verb: print 'This is not an interval:', interval
+        if verb: print('This is not an interval:', interval)
     elif sens and interval[0] > interval[1] :
-        if verb: print 'Invalid interval:'       , interval
+        if verb: print('Invalid interval:'       , interval)
     else                               :
         return True
     return False
@@ -453,7 +458,7 @@ def CheckInterval(interval, verb=True, sens=True):
 
 def CheckVal(value, vmin, vmax, verb=True):
     if value >= vmin and value <= vmax: return True
-    if verb: print value, 'is not in [', vmin, ',', vmax, ']'
+    if verb: print(value, 'is not in [', vmin, ',', vmax, ']')
     return False
 
 
@@ -493,7 +498,7 @@ def CheckLonInterval(lons, verb=True, sens=False):
 
 def CheckLatInLatRange(lat, extr_lats, verb=True):
     if CheckLatInterval(extr_lats, verb): return CheckValInRange(lat, extr_lats, False)
-    if verb: print "Bad latitudes range"
+    if verb: print("Bad latitudes range")
     return False
 
 
@@ -501,7 +506,7 @@ def CheckLonInLonRange(lon, extr_lons, orig, verb=True):
     if CheckLonInterval(extr_lons, verb):
         rlon = RelativeLongitude(lon, orig)
         rlons = list(RelativeLongitude(array(extr_lons), orig))
-        print rlon, rlons
+        print(rlon, rlons)
         return CheckValInRange(rlon, rlons, False)
     return False
 
@@ -514,7 +519,7 @@ def LatRangeIntersect(lats1, lats2, closed=False, verb=True, check=False):
 
 
 def LonRangeIntersect(lons1, lons2, orig, closed=False, verb=True, check=False):
-    print lons1, lons2
+    print(lons1, lons2)
     if CheckLonInterval(lons1, verb) and CheckLonInterval(lons2, verb):
         rlons1, rlons2 = ( list(lons1), list(lons2) )
         while rlons1[0] > rlons1[1]: rlons1[0] -=360
@@ -522,16 +527,16 @@ def LonRangeIntersect(lons1, lons2, orig, closed=False, verb=True, check=False):
 ##         while rlons1[0] < 0 : rlons1 = map(lambda i:i+360,rlons1)
 ##         while rlons2[0] < 0 : rlons2 = map(lambda i:i+360,rlons2)
         while rlons1[0] < 0 or rlons2[0] < 0 :
-            rlons1 = map(lambda i:i+360,rlons1)
-            rlons2 = map(lambda i:i+360,rlons2)
-        if rlons1[1] - rlons1[0] > 360: print "ERROR",lons1
-        if rlons2[1] - rlons2[0] > 360: print "ERROR",lons2
-        print rlons1, rlons2
+            rlons1 = [i+360 for i in rlons1]
+            rlons2 = [i+360 for i in rlons2]
+        if rlons1[1] - rlons1[0] > 360: print("ERROR",lons1)
+        if rlons2[1] - rlons2[0] > 360: print("ERROR",lons2)
+        print(rlons1, rlons2)
         ret = RangeIntersect(rlons1, rlons2, verb, check)
         if check: return ret
         elif ret is not None:
-            while ret[1] > 180 : ret = map(lambda i:i-360,ret)
-            while ret[0] < -180 : ret = map(lambda i:i+360,ret)
+            while ret[1] > 180 : ret = [i-360 for i in ret]
+            while ret[0] < -180 : ret = [i+360 for i in ret]
 ##             return list(AbsoluteLongitude(array(ret), 0.))
             return ret
     if check: return False
@@ -555,7 +560,7 @@ def RangeAbsoluteLongitude(lon, lon0): return RangeRelativeLongitude(lon, -lon0)
 
 
 def GeoViewAngle(lat, lon, lon0):
-    R = (EarthLatRadius(lat) + EarthLatRadius(0))/2
+    R = (EarthLatRadius(lat) + EarthLatRadius(0))/2.
     beta = GeodeticAngle(0, 0, RelativeLongitude(lon, lon0), lat)
     return degrees(arctan2(R*sin(beta), C_HSAT - R*cos(beta)))
 
@@ -580,7 +585,7 @@ def GeoPixelArea(zen, res, bad=None):
 # This function removes North and/or South Geostationnary slot file if at least one Fulldisk file is
 # present within the list to avoid repeated data.  This problem occurs with Goes-E for instance.
 def GeoListGlobeOnly(geolist):
-    if any(map(lambda x: '_G' in x, geolist)):
+    if any(['_G' in x for x in geolist]):
         for f in set(geolist):
             for z in ('_N', '_S'):
                 if z in path.split(f)[1]: geolist.remove(f)
@@ -593,8 +598,8 @@ def GeoListUnicZone(geolist, zone='G'):
     global z0, zones
     z0, zones = '_' + zone,  [ '_G', '_N', '_S' ]
     zones.remove(z0)
-    if   any(map(lambda x: z0       in x, geolist)): exclude = zones
-    elif any(map(lambda x: zones[0] in x, geolist)): exclude = zones[1]
+    if   any([z0       in x for x in geolist]): exclude = zones
+    elif any([zones[0] in x for x in geolist]): exclude = zones[1]
     else                                           : exclude = []
     outlist = list(geolist)
     for z in exclude:

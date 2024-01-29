@@ -1,6 +1,11 @@
-#!/usr/local/bin/python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+from __future__ import print_function
+from __future__ import division
+#from builtins import str
+#from builtins import chr
+#from builtins import range
 from AerusL3_BasicImports import *
 from AerusL3_Reading import GetProductCfg
 from AerusL3_Smoothing import *
@@ -481,7 +486,7 @@ def WriteAerosol(cfg, stat_type, files_out, files_out_in, do_close=False):
                                          d_attr_w[iang]['Offset'])*d_attr_w[iang]['Scaling_Factor']))
 
     if cfg['ACCELERATE']:
-        rnames = filter(lambda x: 'VIS08' not in x and 'IR016' not in x and 'ANGS' not in x, dset_names)
+        rnames = [x for x in dset_names if 'VIS08' not in x and 'IR016' not in x and 'ANGS' not in x]
     else:
         rnames = [ dset_names[0], dset_names[py_ifc.n_channels + 0]] + dset_names[2*py_ifc.n_channels:]
 
@@ -616,7 +621,7 @@ def WriteInstantaneous(cfg, stat_type, file_out, file_out_in, inst_dt, do_close=
 
     rnames = dset_names[:3] + dset_names[py_ifc.n_channels + 0:]
     if cfg['ACCELERATE']:
-        rnames = filter(lambda x: 'VIS08' not in x and 'IR016' not in x and 'ANGS' not in x, rnames)
+        rnames = [x for x in rnames if 'VIS08' not in x and 'IR016' not in x and 'ANGS' not in x]
     n_data_w = len(rnames)
     
     g_attr_w = GetMostCommonGlobalAttributes(cfg, stat_type, n_data_w, start_mod.n_pix*(
@@ -659,7 +664,7 @@ def WriteOutputProduct(cfg, file_out, gattr, dnames, dattr, rdata, outprod, offi
     ret = outf
 
     if cfg['SUBSET'] is None or rdata is None: data = rdata
-    else: data = map(lambda x: zeros((NL, NC), dtype=x.dtype), rdata)
+    else: data = [zeros((NL, NC), dtype=x.dtype) for x in rdata]
 
     if len(dnames) == 0:  # In case of fake history file 
         cfg['PROD_MODE'] = False
@@ -671,18 +676,17 @@ def WriteOutputProduct(cfg, file_out, gattr, dnames, dattr, rdata, outprod, offi
             if WRITTEN_FILE is None:
                 f = h5py.File(outf, 'w')
                 # Set unofficial file attributes
-                for key, val in fattr.items(): SetH5Attribute(f, key, val)
+                for key, val in list(fattr.items()): SetH5Attribute(f, key, val)
                 WRITTEN_FILE, OUT_HDL = outf, f
             elif WRITTEN_FILE != outf:
-                print "Error: bad output unofficial file name"
-                raise()
+                raise("Error: bad output unofficial file name")
             else: f = OUT_HDL
             if not cfg['PROD_MODE'] : obj = f
             else:
                 obj = f.create_group(gattr['ByProduct_Name'])
 
         # Set global/group attributes
-        for key, val in gattr.items(): SetH5Attribute(obj, key, val)
+        for key, val in list(gattr.items()): SetH5Attribute(obj, key, val)
 
         if py_ifc.compression: compress, compress_opts = 'gzip', 5
         else: compress, compress_opts = None, None
@@ -718,7 +722,7 @@ def WriteOutputProduct(cfg, file_out, gattr, dnames, dattr, rdata, outprod, offi
             dset[:] = data[ids]
 
             # Set dataset attributes
-            for key, val in dattr[ids].items(): SetH5Attribute(dset, key, val)
+            for key, val in list(dattr[ids].items()): SetH5Attribute(dset, key, val)
 
         if do_close:
             f.close()
@@ -730,7 +734,7 @@ def WriteOutputProduct(cfg, file_out, gattr, dnames, dattr, rdata, outprod, offi
             gc.collect()
 
     except: 
-        print "Error while writing " + file_out
+        print("Error while writing " + file_out)
         raise
 #        ret = -1
         ret = None
@@ -741,7 +745,9 @@ def WriteOutputProduct(cfg, file_out, gattr, dnames, dattr, rdata, outprod, offi
 
 def SetH5Attribute(obj, key, val):
     if isinstance(val, set) and len(val) == 0: return
-    if isinstance(val, unicode): #test Modification no effect in python3 by Max
+    if isinstance(val, str): #test Modification no effect in python3 by Max
         val = str(val)
-    if not isinstance(val, (str, list, tuple, dict, set)): val = val + 0 # Contrainte interface Fortran
+
+    # added "bytes" for porting to python3
+    if not isinstance(val, (str, list, tuple, dict, set, bytes)): val = val + 0 # Contrainte interface Fortran
     obj.attrs.__setitem__(key, val)

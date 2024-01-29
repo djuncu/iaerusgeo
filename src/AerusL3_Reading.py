@@ -1,6 +1,9 @@
-#!/usr/local/bin/python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+from __future__ import print_function
+from __future__ import division
+#from builtins import range
 from AerusL3_BasicImports import *
 
 # Product configuration parameters
@@ -21,9 +24,9 @@ PRD_REQ_CFG = {
 }
 
 # Some useful constants
-RD_DAT, RD_GATT, RD_DATT = map(lambda x: set([x]), range(3))
+RD_DAT, RD_GATT, RD_DATT = [set([x]) for x in range(3)]
 RD_ATT, RD_SET, RD_ALL = RD_GATT | RD_DATT, RD_DAT | RD_DATT, RD_DAT | RD_GATT | RD_DATT
-CHK_PRD, CHK_SIZ = map(lambda x: set([x]), range(2))
+CHK_PRD, CHK_SIZ = [set([x]) for x in range(2)]
 CHK_NOT, CHK_ALL = set([]), CHK_PRD | CHK_SIZ
 
 
@@ -46,7 +49,7 @@ def GetAlgoCfg(cfg, algo_cfg_file):
     try:
         algo_cfg = Config(None, [""], getall=True).fget({}, algo_cfg_file)
     except:
-        print "Error while reading algo configuration file"
+        print("Error while reading algo configuration file")
         algo_cfg = None
     return algo_cfg
 
@@ -57,7 +60,7 @@ def GetProductCfg(cfg, product_cfg_file):
     try:
         prd_cfg = Config(None, [""]).fget(PRD_REQ_CFG, product_cfg_file)
     except:
-        print "Error while reading product configuration file"
+        print("Error while reading product configuration file")
         prd_cfg = None
     return prd_cfg
 
@@ -67,12 +70,12 @@ def ReadInfoTextFile(cfg, txt_file, label):
     if cfg['VERBOSE'] > 1: print_reading_info(label, txt_file)
     try:
         f = open(txt_file, 'r')
-        lines = filter(lambda x: x[0] != '#' and len(x.strip()) > 0, f.readlines())
-        info_cfg = map(lambda x:x.split(), lines)
-        for info in info_cfg: info[0], info[1] = map(lambda x:FromIcareHdfFullUTC(x), info[:2])
+        lines = [x for x in f.readlines() if x[0] != '#' and len(x.strip()) > 0]
+        info_cfg = [x.split() for x in lines]
+        for info in info_cfg: info[0], info[1] = [FromIcareHdfFullUTC(x) for x in info[:2]]
         f.close()
     except:
-        print "Error while reading " + label +  "file."
+        print("Error while reading " + label +  "file.")
         info_cfg = None
     return info_cfg
 
@@ -97,7 +100,7 @@ def GetRegionFromBandFile(band):
         h5f = h5py.File(band, 'r')
         ret = h5f.attrs['Region_Name']
         h5f.close()
-    except: print "*** Error while reading from file " + band
+    except: print("*** Error while reading from file " + band)
     return ret
 
 
@@ -134,7 +137,7 @@ def ReadSubsetMask(cfg):
         if cfg['SUBTRANSP']: cfg['SUBSET_GRID'] = (transpose(cfg['SUBSET_ROWS']), transpose(cfg['SUBSET_COLS']))
         else               : cfg['SUBSET_GRID'] = (cfg['SUBSET_ROWS'], cfg['SUBSET_COLS'])
     else :
-        cfg['SUBSET_GRID'] = tuple(meshgrid(range(NC), range(NL))[-1::-1])
+        cfg['SUBSET_GRID'] = tuple(meshgrid(list(range(NC)), list(range(NL)))[-1::-1])
         cfg['SUBSET_ROWS'], cfg['SUBSET_COLS'] = cfg['SUBSET_GRID']
         msk = ones((NL, NC), dtype=uint8)
         cfg['SUBTRANSP'] = False
@@ -152,7 +155,7 @@ def ReadHdf4File(cfg, fpath, dset_name, prod, ftyp, todo, check, errwrn=False, D
         if RD_GATT <= todo:
             g_attr = dict()
             msg = "Error while reading " + fpath + "attributes"
-            for key, val in HdfHandle.attributes().items(): g_attr[key] = val
+            for key, val in list(HdfHandle.attributes().items()): g_attr[key] = val
             msg = 'Error: not a ' + ftyp + ' file: ' + fpath
             if CHK_PRD <= check and g_attr['Product_Name'] != prod: raise
             msg = 'Error: inconsistent image size for file: ' + fpath
@@ -165,7 +168,7 @@ def ReadHdf4File(cfg, fpath, dset_name, prod, ftyp, todo, check, errwrn=False, D
             if RD_DATT <= todo:
                 d_attr = dict()
                 msg = "Error while reading " + fpath + " attributes"
-                for key, val in dset.attributes().items(): d_attr[key] = val
+                for key, val in list(dset.attributes().items()): d_attr[key] = val
             if RD_DAT <= todo:
                 msg = "Error while reading " + fpath + " data"
                 tmpdata = dset.get()
@@ -186,7 +189,7 @@ def ReadHdf4File(cfg, fpath, dset_name, prod, ftyp, todo, check, errwrn=False, D
             dset.endaccess()
     except:
         if (errwrn): msg = "Warning : " + msg
-        print msg
+        print(msg)
 
     # Close this file?
     if DO_CLOSE:
@@ -200,7 +203,7 @@ def ReadHdf4File(cfg, fpath, dset_name, prod, ftyp, todo, check, errwrn=False, D
 # This function sets gatt_out with global attributes of gatt_in of an HDF5 file
 # If HDF4 file has been converted to HDF5 file, strip specific suffix
 def SetHdf5GlobalAttributes(gatt_in, gatt_out, sfx2del):
-    for key_in, val in gatt_in.items():
+    for key_in, val in list(gatt_in.items()):
         if len(sfx2del) > 0 and key_in.endswith(sfx2del): key_out = key_in[:-len(sfx2del)]
         else: key_out = key_in
         gatt_out[key_out] = val
@@ -214,7 +217,7 @@ def ReadHdf5File(cfg, fpath, dset_name, prod, ftyp, todo, check, errwrn=False, D
     try:
         msg = "Error while opening " + fpath
         if HdfHandle is None: HdfHandle = h5py.File(fpath, 'r')
-        if prod in HdfHandle.keys(): handle = HdfHandle[prod]
+        if prod in list(HdfHandle.keys()): handle = HdfHandle[prod]
         else: handle = HdfHandle
         if RD_GATT <= todo:
             g_attr = dict()
@@ -235,12 +238,14 @@ def ReadHdf5File(cfg, fpath, dset_name, prod, ftyp, todo, check, errwrn=False, D
             if RD_DATT <= todo:
                 d_attr = dict()
                 msg = "Error while reading " + fpath + " attributes"
-                for key, val in dset.attrs.items(): d_attr[key] = val
+                for key, val in list(dset.attrs.items()): d_attr[key] = val
             if RD_DAT <= todo:
                 msg = "Error while reading " + fpath + " data"
                 tmpdata = dset[:]
 #                if prod in angles_p and prod[1] == 'A': tmpdata = AngleConversion(tmpdata, d_attr)
-                if prod in angles_p: tmpdata = AngleConversion(tmpdata, d_attr, azi=(prod[1] == 'A'))
+                if prod in angles_p:
+                    tmpdata = AngleConversion(tmpdata, d_attr, azi=(prod[1] == 'A'))
+
                 if cfg['SUBSET'] is not None and tmpdata.shape != (NL, NC):
                     if cfg['SUBSUBSET'] is not None and tmpdata.shape != cfg['SUBSET_ROWS'].shape:
                         tmpdata = tmpdata[:,cfg['SUBSUBSET']]
@@ -253,9 +258,10 @@ def ReadHdf5File(cfg, fpath, dset_name, prod, ftyp, todo, check, errwrn=False, D
                         msg = 'Inconsistent data size for subset inputs'
                         raise
                     data = tmpdata
-    except:
+    except Exception as e:
         if (errwrn): msg = "Warning : " + msg
-        print msg
+        print(msg)
+        print(e)
 
     # Close this file?
     if DO_CLOSE:
@@ -296,9 +302,14 @@ def ReadAndWriteBin(cfg, path_in, path_out, ipath, sdsnam, prod, ftyp, pfx=''):
             elif prod is None: message = sdsnam
             else                : message = prod + '/' + sdsnam + '/' + pfx
             print_reading_info(message, path_in[ipath])
-        if IsH5File(path_in[ipath]): g_attr, d_attr, data = ReadHdf5File(cfg, path_in[ipath], sdsnam, prod, ftyp, rd, chk,
-                                                                         sfx2del=H4TOH5_CONV_SFX)
-        else                       : g_attr, d_attr, data = ReadHdf4File(cfg, path_in[ipath], sdsnam, prod, ftyp, rd, chk)
+        if IsH5File(path_in[ipath]):
+            g_attr, d_attr, data = ReadHdf5File(
+                cfg, path_in[ipath], sdsnam, prod, ftyp, rd, chk,
+                sfx2del=H4TOH5_CONV_SFX
+            )
+
+        else:
+            g_attr, d_attr, data = ReadHdf4File(cfg, path_in[ipath], sdsnam, prod, ftyp, rd, chk)
         ext = ('.%s.gb%d' % (pfx, data.dtype.itemsize)).replace('..', '.')
         if rd == RD_ALL:
             if   prod in angles_p:
@@ -337,7 +348,7 @@ def ReadLatitudesRaw(cfg):
         lats = int16(rint(data)).reshape(gattr['NL'], gattr['NC'])
         py_ifc.scale_lat, py_ifc.offset_lat, py_ifc.missing_lat = 100., 0.0, -32768
     except:
-        print "Error reading latitudes from file %s" % cfg['LAT']
+        print("Error reading latitudes from file %s" % cfg['LAT'])
         lats, gattr = None, None
     return gattr, lats
 
@@ -360,7 +371,7 @@ def GetBinaryLatLon(cfg, key, name, shp):
         data[where(data > -500)] *= 100
         return int16(rint(data)).reshape(shp)
     except:
-        print "Error reading %s from file %s" % (name, cfg[key])
+        print("Error reading %s from file %s" % (name, cfg[key]))
         return None
 
 
@@ -370,7 +381,7 @@ def ReadAodClimato(cfg):
     try:
         h5f = h5py.File(cfg['AOD_CLM'], 'r')
         mth = int(cfg['DATE'][4:6]) - 1
-        print '  --> Month:', mth + 1
+        print('  --> Month:', mth + 1)
         aer_mod1, aer_mod2, aer_mod3, tot_aod, bdw_mod2, bdw_mod3 = h5f['Aerosol model 1'][:],  h5f['Aerosol model 2'][:], \
             h5f['Aerosol model 3'][:],  h5f['Total AOD'][:], h5f['Boundary weight 2'][:], h5f['Boundary weight 3'][:]
         h5f.close()
@@ -382,7 +393,7 @@ def ReadAodClimato(cfg):
         h5f = None
         return aer_mod1[..., mth], aer_mod2[..., mth], aer_mod3[..., mth], tot_aod[..., mth], bdw_mod2[..., mth], bdw_mod3[..., mth]
     except:
-        print "Error reading %s from file %s" % (name, key)
+        print("Error reading %s from file %s" % (name, key))
         return None
 
 

@@ -19,15 +19,18 @@ ifneq ($(LIVR),0)
         FOPTLVL=-O2
 else
         COPTLVL=-g
-        FOPTLVL=-ggdb -fbounds-check 
+        FOPTLVL=-ggdb -fbounds-check
 endif
 
-#S = src
+S1 = src
 S = C_F90
 NR = $(S)/nr
 
 FC = gfortran
 CC = gcc
+F2PY = f2py
+#3
+PYTHON_SO_SUFFIX := $(shell python3-config --extension-suffix)
 
 SRC =	$(NR)/nrtype.f90		\
 	$(NR)/nrutil.f90		\
@@ -41,11 +44,14 @@ SRC =	$(NR)/nrtype.f90		\
 	$(S)/brdfmodels.f90		\
 	$(S)/invers.f90			\
 	$(S)/LM.f90			\
+	$(S)/flotsam_interface.f90			\
 	$(S)/calculate_ref_tol.f90	\
 	$(S)/start_mod.f90		\
 	$(S)/aerosol_parameters.f90	\
-	$(S)/start_exe.f90		\
+	$(S)/start_exe.f90	        \
 	$(S)/smoothing.f90
+
+
 TMPOBJ = $(SRC:.c=.o)
 objects = $(TMPOBJ:.f90=.o)
 
@@ -56,28 +62,50 @@ MAIN_ENV_BASE = /usr
 MAIN_ENV_DIR = $(MAIN_ENV_BASE)
 
 MOD = AerusL3
-LIB = lib$(MOD).a
+LIB = lib$(MOD).so
 
 CFLAGS = $(COPTLVL) -std=c99 -fPIC -m$(ENV)
 FFLAGS = $(FOPTLVL) -funroll-loops -I$(MAIN_ENV_DIR)/include -I$(MAIN_ENV_DIR)/lib -ffree-line-length-none -fPIC -m$(ENV) -fcheck=all -fmax-array-constructor=137000 -fallow-invalid-boz -fallow-argument-mismatch
-F2PYFLAGS = -L$(MAIN_ENV_DIR)/lib -L. -l$(MOD)
+# double check if -L$(S1) is necessary
+F2PYFLAGS = -L$(MAIN_ENV_DIR)/lib -L. -l$(MOD) -L$(S1)
+
+FLOTSAM_DIR = /cnrm/vegeo/juncud/software/flotsam-compiled
+FLOTSAM_LIB_FLAGS = -I$(FLOTSAM_DIR)/include -L$(FLOTSAM_DIR)/lib -Wl,-rpath,$(FLOTSAM_DIR)/lib -lflotsam
+F_FLOTSAM_FLAGS = -O2 -funroll-loops -fstrength-reduce -frerun-loop-opt -fcheck=all -shared -o
+
+# the compilation is certainly ﬁckle....
+# first, NPY_DISTUTILS_APPEND_FLAGS=1 was required, now it breaks the compilation. 
+# (actually since numpy 1.18 "1" should be default anyway)
+# Not sure why, but have to keep an eye on it.
+#unexport LD_LIBRARY_FLAGS
+
+# double check if export statement is necessary
+export LDFLAGS="-Wl,-rpath,$(S1) -Wl,-rpath,."
+#export -e NPY_DISTUTILS_APPEND_FLAGS=1
+#export FC=gfortran # << probably unnecessary
 
 $(MOD): $(LIB)
-	f2py -c -m $@ --fcompiler=gnu95 --f90flags="$(FFLAGS)" $(S)/py_ifc.f90 $(S)/start_mod.f90 $(S)/start_exe.f90 $(S)/smoothing.f90 $(F2PYFLAGS)
+	# NOTE juncud:24Nov2023: unexpectedly this starts to crash without any obvious changes to the last time I tried compiling.
+	#   the issue seems to be with calling f2py with the -c flag.
+	#   might have something to do with this warning? "[...]python3.11/site-packages/numpy/f2py/f2py2e.py:686: VisibleDeprecationWarning:
+	#   distutils has been deprecated since NumPy 1.26.Use the Meson backend instead, or generate wrappers without -c and use a custom build script"
 
-$(LIB): $(objects)
-	ar -cr $@ $(objects) *.mod
+	#$(F2PY) -c -m $@ --fcompiler=gnu95 $(S)/py_ifc.f90 $(S)/start_mod.f90 $(S)/start_exe_flotsam.f90 $(S)/smoothing.f90 --f90flags="$(FFLAGS) $(FLOTSAM_LIB_FLAGS)" $(F2PYFLAGS) $(F2PY_FLOTSAM_FLAGS)
+	
+	# this needs to be commented if using the makef2py script....
+	#f2py -c -m $@ $(S)/py_ifc.f90 $(S)/start_mod.f90 $(S)/start_exe_flotsam.f90 $(S)/start_exe.f90 $(S)/smoothing.f90 --f90flags="$(FFLAGS)" $(F2PYFLAGS)
+	#f2py -m $@ $(S)/py_ifc.f90 $(S)/start_mod.f90 $(S)/start_exe_flotsam.f90 $(S)/start_exe.f90 $(S)/smoothing.f90 #$(F2PYFLAGS)
 
-%.o : %.f90
-	$(FC) -c $< -o $@ $(FFLAGS)
+$(LIB):
+	$(FC) -cpp -fPIC -shared -o $@ $(SRC) $(FFLAGS) $(FLOTSAM_LIB_FLAGS)
 
 all   :
 	make clear
 	make
 
-clean:  
-	rm -f $(LIB) *.mod $(objects) *~ */*~ */*/*~
+clean:
+	rm -f $(LIB) *.mod *~ */*~ */*/*~
 
 clear:
 	make clean
-	rm -f *.a *.pyc */*.pyc */*/*.pyc $(MOD).so
+	rm -f *.a *.pyc */*.pyc */*/*.pyc *.so $(MOD)$(PYTHON_SO_SUFFIX)

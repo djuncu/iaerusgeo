@@ -1,17 +1,27 @@
-#!/usr/local/bin/python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+from __future__ import print_function
+from __future__ import division
+#from builtins import map
+#from builtins import str
+#from builtins import chr
+#from builtins import range
 import sys
 import os
 from os import path
 
+import numpy as np
+import h5py
+
 from AerusL3_BasicImports import *
 from AerusL3_Reading import *
 from AerusL3_Writing import *
+from functools import reduce
 
 ReadLatLon = ReadLatLonRaw
 
-_OUT, _INP, _IN, _INS, _NOPE = range(5)
+_OUT, _INP, _IN, _INS, _NOPE = list(range(5))
 
 #FIXED_PRV_FILES = [ 'LAT', 'LON' ] + [ 'AOD_CLM' ]*6 + [ 'CST_PIX' ]
 FIXED_PRV_FILES = [ 'LAT', 'LON' ] + [ ('AOD_CLM' + str(i)) for i in range(6) ] + [ 'CST_PIX' ]
@@ -19,7 +29,7 @@ FIXED_PRV_FILES = [ 'LAT', 'LON' ] + [ ('AOD_CLM' + str(i)) for i in range(6) ] 
 
 # This function Checks the impact of dated infos on a slot
 def CheckImpact(bad_dates, dt, duration, counter, pos):
-    bad = filter(lambda x: x[1] > dt and x[0] < dt + timedelta(minutes=duration), bad_dates)
+    bad = [x for x in bad_dates if x[1] > dt and x[0] < dt + timedelta(minutes=duration)]
     chk = len(bad) > 0
     if chk: counter[pos] += 1
     return chk
@@ -36,7 +46,7 @@ def SetFilesConfig(cfg):
     # efficient than opening and closing up to 672 HDF files just to read an attribute
     dt0, keys = cfg['DATETIME'], cfg['VIS_CHN'] + [ 'ANGLES', 'ECMWF' ]
 
-    if cfg['VERBOSE']: print "Check for available scenes. "
+    if cfg['VERBOSE']: print("Check for available scenes. ")
 
     # Abort if no available scene
     if None in [cfg[key] for key in keys]: exit("No L1 scene available. Abort")
@@ -47,7 +57,7 @@ def SetFilesConfig(cfg):
     sc_times, bad_slts = [], [0, 0]
     for hh in range(cfg['NHOURS']):
 #        for mm in map(lambda x:x*SLOT_FREQ, range(60/SLOT_FREQ)):
-        for mm in map(lambda x:x*SLOT_FREQ, set(range(60/SLOT_FREQ) + [(1-cfg['SENS'])*2])):
+        for mm in [x*SLOT_FREQ for x in set(list(range(60//SLOT_FREQ)) + [(1-cfg['SENS'])*2])]:
             # For INST, we do not want to repeat XX-00 if temporal window is longer than one hour
             if not cfg['TRIHOR'] and not cfg['DAILY_MODE'] and hh > 0 and mm == 0:
                 continue
@@ -63,7 +73,7 @@ def SetFilesConfig(cfg):
 
                 nok, tmpfiles = 0, dict.fromkeys(keys)
                 for key in keys:
-                    check = map(lambda x:dtchk in x, cfg[key])
+                    check = [dtchk in x for x in cfg[key]]
                     if any(check): # Datetime string found in at least one file of the list
                         nok += 1
                         tmpfiles[key] = cfg[key][check.index(True)]
@@ -78,13 +88,13 @@ def SetFilesConfig(cfg):
     for key in keys: cfg[key] = files_ok[key] # Set the actual lists of files to process
 
     if cfg['VERBOSE']:
-        if bad_slts[0] > 0: print "Warning: %d possibly eliminated slots due to solar eclipse"    % bad_slts[0]
-        if bad_slts[1] > 0: print "Warning: %d possibly eliminated slots due to known corruption" % bad_slts[1]
+        if bad_slts[0] > 0: print("Warning: %d possibly eliminated slots due to solar eclipse"    % bad_slts[0])
+        if bad_slts[1] > 0: print("Warning: %d possibly eliminated slots due to known corruption" % bad_slts[1])
 
     # Now set the generic names of the temporary files to be used by fortran code
-    for key in cfg['VIS_CHN']: cfg['tmp' + key] = map(lambda x: path.splitext(x)[0], files_ok[key])
-    for key in ANGLES_KEYS   : cfg['tmp' + key] = map(lambda x: path.splitext(x)[0] + '_' + key, cfg['ANGLES'])
-    for key in ECMWF_KEYS    : cfg['tmp' + key] = map(lambda x: path.splitext(x)[0] + '_' + key, cfg['ECMWF'])
+    for key in cfg['VIS_CHN']: cfg['tmp' + key] = [path.splitext(x)[0] for x in files_ok[key]]
+    for key in ANGLES_KEYS   : cfg['tmp' + key] = [path.splitext(x)[0] + '_' + key for x in cfg['ANGLES']]
+    for key in ECMWF_KEYS    : cfg['tmp' + key] = [path.splitext(x)[0] + '_' + key for x in cfg['ECMWF']]
 
 
     try   : nhistfiles = len(cfg['CK_K012_IN'])
@@ -165,18 +175,32 @@ def ReordonInFiles(files, offset):
 
 # This function sends algorithm and product configuration to the Fortran 90 code part
 def interface_algo(alg_cfg, cfg):
+    """
+    a few changes here after porting to python3
+    """
 
     # Send algorithm configuation
-    for key, val in alg_cfg.items():
+    for key, val in list(alg_cfg.items()):
         if isinstance(val, str):
 #            exec("py_ifc.%s[:%d] = '%s'" % (key.lower(), len(val), val))
 #            exec("py_ifc.%s[%d:] = ' '"  % (key.lower(), len(val)))
-            exec("strlth=py_ifc.%s.dtype.itemsize" % key.lower())
-            exec("py_ifc.%s = '%s%s'" % (key.lower(), val, ' '*(strlth - len(val))))
+            #exec("strlth=py_ifc.%s.dtype.itemsize" % key.lower())
+            ifc_func = getattr(py_ifc, key.lower())
+            strlth = ifc_func.dtype.itemsize
+            #exec("py_ifc.%s = '%s%s'" % (key.lower(), val, ' '*(strlth - len(val))))
+            setattr(py_ifc, key.lower(), val + ' '*(strlth - len(val)))
         elif isinstance(val, list):
-            exec("py_ifc.%s[:%d] = %s" % (key.lower(), len(val), str(val)))
+            #exec("py_ifc.%s[:%d] = %s" % (key.lower(), len(val), str(val)))
+            setattr(py_ifc, key.lower(), [str(v) for v in val])
+            #tmp_list = getattr(py_ifc, key.lower())
+            #for v in enumerate(val):
+            #    # this should update the py_ifc attribute as well...
+            #    tmp_list.append(str(val))
+        elif isinstance(val, bool):
+            setattr(py_ifc, key.lower(), int(val))
         else:
-            exec("py_ifc.%s = %s" % (key.lower(), str(val)))
+            #exec("py_ifc.%s = %s" % (key.lower(), str(val)))
+            setattr(py_ifc, key.lower(), str(val))
 
     # Send product configuration including temporary file names arrays
     py_ifc.mode          = cfg['MODE']
@@ -192,7 +216,7 @@ def interface_algo(alg_cfg, cfg):
     files_prv_in  = SetFileArray(_NOPE, cfg, FIXED_PRV_FILES + [ ('K012_IN', 'CK_IN') ])
     files_prv_in  = ReordonInFiles(files_prv_in, len(FIXED_PRV_FILES))
 
-    files_inp_ok  = SetFileArray(  _IN, cfg, [ tuple( map(lambda x: 'tmp' + x, cfg['VIS_CHN'] + ANGLES_KEYS + ECMWF_KEYS) ) ])
+    files_inp_ok  = SetFileArray(  _IN, cfg, [ tuple( ['tmp' + x for x in cfg['VIS_CHN'] + ANGLES_KEYS + ECMWF_KEYS] ) ])
     files_inp_in  = SetFileArray(_NOPE, cfg, [ tuple( cfg['VIS_CHN'] + ['ANGLES']*len(ANGLES_KEYS) + ['ECMWF']*len(ECMWF_KEYS) ) ])
 
     files_out_ok  = SetFileArray( _OUT, cfg, reduce(lambda x,y: x+y, [['outALK012_' + k, 'outALCK_' + k, 'outAL_' + k]
@@ -254,7 +278,7 @@ def interface_attrs(gattl, gattr, gatta, gatte):
 def AerusL3(cfg):
 
     # INITIALIZE
-    if cfg['VERBOSE']: print "Initialisations"
+    if cfg['VERBOSE']: print("Initialisations")
 
     # Try to build temporary directory if none
     if not MakeNewDir(cfg['TMPDIR']): exit(1)
@@ -262,7 +286,7 @@ def AerusL3(cfg):
     # Determine algorithm configuration mode
     alg_mode = cfg['RECURSION'] + 3*cfg['COMPO']
     if alg_mode == 0 or alg_mode >= len(ALG_CFG_NAMES): exit("Error: invalid algorithm configuration mode: %d" % alg_mode)
-    if cfg['VERBOSE']: print "Algorithm configuration: " + ALG_CFG_MODES[alg_mode]
+    if cfg['VERBOSE']: print("Algorithm configuration: " + ALG_CFG_MODES[alg_mode])
 
     # Check parameters and algorithm mode consistency
     if cfg['RECURSION'] > 1:
@@ -275,7 +299,7 @@ def AerusL3(cfg):
             for key in [ 'CK_IN', 'K012_IN' ]:
                 if cfg[key] is not None: exit ('Error: only one of CK_K012_IN and %s parameter can exist' % key)
 
-    if cfg['VERBOSE']: print "Read configuration files"
+    if cfg['VERBOSE']: print("Read configuration files")
 
     # Read algo technical parameters
     alg_cfg_pth = path.join(cfg['MAINDIR'], CFG_DIR_NAM, ALG_CFG_NAMES[alg_mode])
@@ -307,7 +331,7 @@ def AerusL3(cfg):
     py_ifc.n_files_in_scene = py_ifc.n_channels + 4 + 2
     py_ifc.n_scenes = SetFilesConfig(cfg)
     if py_ifc.n_scenes == 0: exit("No complete input scenes available! No product generated!")
-    if cfg['VERBOSE']: print 'Number of complete input scenes: %d' % py_ifc.n_scenes
+    if cfg['VERBOSE']: print('Number of complete input scenes: %d' % py_ifc.n_scenes)
 
     # Read or initialize subsetting mask
     cfg['SUBSET_MSK'] = ReadSubsetMask(cfg)
@@ -316,10 +340,10 @@ def AerusL3(cfg):
     elif msk_nlin < algo_cfg['LinesBlock']: algo_cfg['LinesBlock'] = msk_nlin
 
     # Initialize algo configuration Fortran90 interface
-    if cfg['VERBOSE']: print 'Initialize algo configuration Fortran90 interface'
+    if cfg['VERBOSE']: print('Initialize algo configuration Fortran90 interface')
     files_prv_ok, files_prv_in, files_inp_ok, files_inp_in, files_out_ok, files_out_out, files_inst = interface_algo(algo_cfg, cfg)
 
-    if cfg['VERBOSE']: print "Read ancillary files"
+    if cfg['VERBOSE']: print("Read ancillary files")
 
     # Read latitudes and longitudes files
     gattlat, lats, lons = ReadLatLon(cfg)
@@ -360,7 +384,7 @@ def AerusL3(cfg):
     current_prodver = "%d.%d" % GetIcareVersionFromStr(cfg['PROD_VER'])
     if py_ifc.recursion and not py_ifc.startseries:
 
-        if cfg['VERBOSE']: print "Read previous memory product files"
+        if cfg['VERBOSE']: print("Read previous memory product files")
 
         for k in range(py_ifc.nhistfiles):
 
@@ -425,7 +449,7 @@ def AerusL3(cfg):
                         prev_date = FromIcareHdfDate(gatt['Date'])
                         if prev_date < MINDATE.date() or prev_date > MAXDATE.date(): raise
                 except:
-                    print "Warning: invalid date of previous result: " + gatt['Date']
+                    print("Warning: invalid date of previous result: " + gatt['Date'])
                     set_fortran_string(py_ifc.o_qua_flag, "NOK")
 
                 start_mod.year_in, start_mod.month_in, start_mod.day_of_month_in = prev_date.year, prev_date.month, prev_date.day
@@ -439,7 +463,7 @@ def AerusL3(cfg):
         exec ("py_ifc.offset_%s  = zeros((py_ifc.n_scenes,), dtype=float32)" % (data_p[i].lower()))
         exec ("py_ifc.missing_%s = zeros((py_ifc.n_scenes,), dtype=int32  )" % (data_p[i].lower()))
 
-    if cfg['VERBOSE']: print "Read complete scenes input data files"
+    if cfg['VERBOSE']: print("Read complete scenes input data files")
 
     # Read input files and write temporary files used by F90 code
     for n in range(py_ifc.n_scenes):
@@ -474,7 +498,7 @@ def AerusL3(cfg):
             ret = ReadAndWriteBin(cfg, files_inp_in, files_inp_ok, n*py_ifc.n_files_in_scene + i, data_d[i], data_p[i], data_t[i], '')
             if ret is None: exit(1)
             exec ("py_ifc.scale_%s[n], py_ifc.offset_%s[n], py_ifc.missing_%s[n] = ret[:3]" % 
-                  tuple(map(lambda x:x.lower(), (data_p[i], data_p[i], data_p[i]))))
+                  tuple([x.lower() for x in (data_p[i], data_p[i], data_p[i])]))
             gattang = ret[3]
             g_attr_r['Angles_Input_Files'].add(IcarePath(files_inp_in[n*py_ifc.n_files_in_scene + i]))
 
@@ -483,7 +507,7 @@ def AerusL3(cfg):
             ret = ReadAndWriteBin(cfg, files_inp_in, files_inp_ok, n*py_ifc.n_files_in_scene + i, data_d[i], data_p[i], data_t[i], '')
             if ret is None: exit(1)
             exec ("py_ifc.scale_%s[n], py_ifc.offset_%s[n], py_ifc.missing_%s[n] = ret[:3]" % 
-                  tuple(map(lambda x:x.lower(), (data_p[i], data_p[i], data_p[i]))))
+                  tuple([x.lower() for x in (data_p[i], data_p[i], data_p[i])]))
             gattecm = ret[3]
             g_attr_r['ECMWF_Input_Files'].add(IcarePath(files_inp_in[n*py_ifc.n_files_in_scene + i]))
 
@@ -492,26 +516,56 @@ def AerusL3(cfg):
     ladate = datetime.strptime(cfg['DATE'][:8], "%Y%m%d")
     start_mod.year, start_mod.month, start_mod.day_of_month = ladate.year, ladate.month, ladate.day
 
-    # GO! Lauch F90 scientific software
-    if cfg['VERBOSE']: print "Lauch Aerosol and Albedo retrieval (blocks of %d rows)" % py_ifc.linesblock
+    # New code for reading FLOTSAM LUT's (could move it into AerusL3_Reading.py)
+    # (juncud 08/2023)
+    # let's make a switch for RTM
+    # MSA: 1  FLOTSAM: 2
+    if cfg['FLOTSAM_FLAG']:
+        rtm_switch = 2
+    else:
+        rtm_switch = 1
+
+    if rtm_switch in [1,2]:
+        #flotsam_lut_fn = '/cnrm/vegeo/juncud/NO_SAVE/iAERUS-GEO/flotsam_lut_all_channels.h5'
+        flotsam_lut_fn = path.join(cfg['ANC_DIR'], FLT_LUT_NAM)
+        with h5py.File(flotsam_lut_fn, 'r') as f:
+            # NOTE currently passing these variables as 32bit to start_exe
+            #   and later pass them as 64bit to FLOTSAM (flotsam default real type).
+            #   Maybe that's ok but could also store LUT as 64 bit and pass all
+            #   the way through as flotsam real type
+            pf_raw = f['pf_raw'][:]
+            pf_smooth = f['pf_smooth'][:]
+            pf_components = f['pf_components'][:]
+            ssa = f['ssa'][:]
+
+            ang = f['dimensions']['scattering_angles'][:]
+            aod_values = f['dimensions']['aod_values'][:]
+            aerosol_types = f['dimensions']['aerosol_types'][:]
+            channels = f['dimensions']['channels'][:]
+
+    # GO! Launch F90 scientific software
+    if cfg['VERBOSE']: print("Launch Aerosol and Albedo retrieval (blocks of %d rows)" % py_ifc.linesblock)
     if cfg['M_A_P'] < 2:
-        status = start_exe()
-        if cfg['VERBOSE']: print '\n  Retrieval completed'
+        if rtm_switch == 1:
+            status = start_exe(pf_raw, pf_smooth, pf_components, ssa, ang, aerosol_types, rtm_switch)
+        elif rtm_switch == 2:
+            status = start_exe(pf_raw, pf_smooth, pf_components, ssa, ang, aerosol_types, rtm_switch)
+        if cfg['VERBOSE']: print('\n  Retrieval completed')
 
     # Write outputs
     if py_ifc.recursion :
         stat_type = "recursive, timescale: %ddays" % py_ifc.timescale
 
         if cfg['TRIHOR'] or cfg['DAILY_MODE']:
-            if cfg['VERBOSE']: print "Write official output products"
+            if cfg['VERBOSE']: print("Write official output products")
             WriteOfficialProducts  (cfg, stat_type, files_out_out, files_out_ok)
-            if cfg['VERBOSE']: print "Write unofficial and/or memory output products"
+            if cfg['VERBOSE']: print("Write unofficial and/or memory output products")
             WriteUnofficialProducts(cfg, stat_type, files_out_out, files_out_ok, compo=False)
 
         if py_ifc.instoutput:
-            if cfg['VERBOSE']: print "Write instantaneous estimation products"
+            if cfg['VERBOSE']: print("Write instantaneous estimation products")
             files_inst = sorted(files_inst)
-            fidx = range(len(files_inst))
+            fidx = list(range(len(files_inst)))
             if not cfg['TRIHOR'] and not cfg['DAILY_MODE']: fidx = fidx[-1:]
             for k in fidx:
                 WriteInstantaneous(cfg, stat_type, files_inst[k], files_inst[k], cfg['INST_TIMES'][k], do_close=True)
@@ -524,7 +578,7 @@ def AerusL3(cfg):
 #        # Write covariance matrix output files
 #        WriteCovarianceMatrix(cfg, stat_type, files_out, py_ifc.n_files_out_channel_compo, py_ifc.n_fileout_rec)
 
-    if cfg['VERBOSE']: print "Execution OK"
+    if cfg['VERBOSE']: print("Execution OK")
 
 
 def main():
@@ -558,6 +612,7 @@ def main():
         'ECMWF'         : (str, 'e:',     ''),
         'SMOOTH'        : (bool,'l:',   True),
         'ACCELERATE'    : (bool,'x:',  False),
+        'FLOTSAM_FLAG'  : (bool,'F:',  False),
 #        'RECURSION'     : (int, 'R:',      0),
 #        'COMPO'         : (int, 'Z:',      0),
 #        'M_A_P'         : (int, 'm:',      0),
@@ -572,7 +627,7 @@ def main():
     # - activate instantaneous mode
     # - activate multi-products mode for earliest information
     # - deactivate debug mode for production
-    # - deactivate composition mode 
+    # - deactivate composition mode
 
     cfg['M_A_P' ], cfg['COMPO'   ] = 0, 0
 
@@ -598,11 +653,11 @@ def main():
     init_vis_chn(cfg)
 
     if cfg['SUBSUBSET'] is not None:
-        cfg['SUBSUBSET'] = map(int, cfg['SUBSUBSET'].split(','))
+        cfg['SUBSUBSET'] = list(map(int, cfg['SUBSUBSET'].split(',')))
 
     # Set product version if not specified
     if cfg['PROD_VER'] == ICA_DFT_VER_KEY: cfg['PROD_VER'] = AERUS_L3_DFT_VER
-    if cfg['VERBOSE']: print "\n%s v%d.%d.%d\n" % ((cfg['PRODUCT'],) + AERUS_L3_VER)
+    if cfg['VERBOSE']: print("\n%s v%d.%d.%d\n" % ((cfg['PRODUCT'],) + AERUS_L3_VER))
 
     # Check if processing true start
     if cfg['START'] > 0 :
@@ -611,7 +666,10 @@ def main():
         # Check if processing fake start
         if cfg['CK_K012_IN'] is None:
             version  = 'V' + GetIcareFileVersion(GetIcareVersionFromStr(cfg['PROD_VER']))
-            prevdate = datetime.strptime(cfg['DATE'], "%Y%m%d") - timedelta(days=1)
+            if len(cfg['DATE']) == 8:
+                prevdate = datetime.strptime(cfg['DATE'], "%Y%m%d") - timedelta(days=1)
+            elif len(cfg['DATE']) == 12:
+                prevdate = datetime.strptime(cfg['DATE'], "%Y%m%d%H%M") - timedelta(days=1)
             cfg['CK_K012_IN'] = path.join(cfg['ANC_DIR'], FAKE_START_NAME.replace(NRTSTR, NRT_STRS[cfg['NRT']]). \
                                               replace(VERSTR, version).replace(DTSTR, IcareHdfFileNameUTC(prevdate.date())))
             if not path.exists(cfg['CK_K012_IN']):
@@ -637,11 +695,11 @@ def main():
 #                break
             if not eve_ok: exit("No history file supplied for the eve (even a fake one)")
             if hist_file_ok is None: exit("No valid history file supplied")
-            if delay > 1: print "Warning: history file older than 1 day %s" % hist_file_ok
+            if delay > 1: print("Warning: history file older than 1 day %s" % hist_file_ok)
 #            cfg['CK_K012_IN'] = hist_file
-            if cfg['VERBOSE']: print "History file: %s\nAge: %d\n" % (hist_file, delay)
+            if cfg['VERBOSE']: print("History file: %s\nAge: %d\n" % (hist_file, delay))
             py_ifc.age_hist_file[:len(age_hist_file)] = array(age_hist_file)
-            for kkk in range(py_ifc.age_hist_file.size): print kkk, py_ifc.age_hist_file[kkk]
+            for kkk in range(py_ifc.age_hist_file.size): print(kkk, py_ifc.age_hist_file[kkk])
 
         cfg['RECURSION'] = 2
     cfg['K012_IN'], cfg['CK_IN'] = None, None
@@ -657,13 +715,13 @@ def main():
 
     # Run main code. From now on, any handled failure will produce a fake history file.
     # This prevents from operational production failure.
-    try: 
+    try:
         AerusL3(cfg)
 
     except SystemExit as err:
-        print err
+        print(err)
         if cfg['DAILY_MODE']:
-            print "Writing fake history file"
+            print("Writing fake history file")
             WriteFakeHistoryFile(cfg)
 
 

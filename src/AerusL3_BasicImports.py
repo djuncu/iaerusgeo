@@ -1,6 +1,9 @@
-#!/usr/local/bin/python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+from __future__ import print_function
+from builtins import str
+from builtins import range
 import gc
 from datetime import *
 from os import path
@@ -9,14 +12,14 @@ from numpy.core.records import fromrecords
 
 try   : import h5py
 except:
-    print "WARNING - AERUSL3_BasicImports.py: cannot load h5py"
+    print("WARNING - AERUSL3_BasicImports.py: cannot load h5py")
     pass
 
 try:
     from pyhdf.SD import *
-    print "Loading pyhdf.SD OK"
+    print("Loading pyhdf.SD OK")
 except:
-    print "WARNING - AERUSL3_BasicImports.py: Cannot load pyhdf.SD"
+    print("WARNING - AERUSL3_BasicImports.py: Cannot load pyhdf.SD")
     pass
 
 from IcareUtil import *
@@ -36,8 +39,9 @@ PROCESSING_MODES = ['REA', 'NRT']
 
 ANC_DIR_NAM, CFG_DIR_NAM, PRD_CFG_NAM, ECL_CFG_NAM, BAD_CFG_NAM, AOD_CLM_NAM = \
     "ancillary", "config", "Product.%s.cfg", "solar_eclipses.dat", "invalid_slots.dat", "%s.3km.aer.h5"
+FLT_LUT_NAM = "aer_opt_lut_flotsam.h5"
 ALG_CFG_MODES = [ "", "only_recursion_start", "only_recursion", "only_composition", "recursion_and_composition_start", "recursion_and_composition" ]
-ALG_CFG_NAMES = map(lambda x:'Algo_' + x + '.cfg', ALG_CFG_MODES)
+ALG_CFG_NAMES = ['Algo_' + x + '.cfg' for x in ALG_CFG_MODES]
 
 FAKE_START_NAME = 'SEV_AERUS-INTERNAL-@NRT@D3_@DATE@_@VERSION@.fake2start.h5'
 DTSTR, NRTSTR, VERSTR = '@DATE@', '@NRT@', '@VERSION@'
@@ -86,13 +90,13 @@ ecmwf_p = ECMWF_KEYS
 ecmwf_d = [ 'WIND_SPEED', 'WIND_DIRECTION' ]
 ecmwf_t = [ 'wind speed', 'wind direction' ]
 
-par_p = map(lambda x: 'AL-' + x + '-K012', ALL_VIS_CHN)
+par_p = ['AL-' + x + '-K012' for x in ALL_VIS_CHN]
 par_d = [ 'K0', 'K1', 'K2', 'K3' ]
 par_d_ = [ 'R0', 'R1', 'R2']
 par_t = 'model parameter'
 par_dt = int16
 
-cov_p = map(lambda x: 'AL-' + x + '-CK', ALL_VIS_CHN)
+cov_p = ['AL-' + x + '-CK' for x in ALL_VIS_CHN]
 cov_d = [ 'C00', 'C01', 'C02', 'C03', 'C11', 'C12', 'C13', 'C22', 'C23', 'C33' ]
 cov_t = 'model parameter'
 cov_dt = int16
@@ -121,7 +125,7 @@ cm_p = "Confidence measure VIS06"
 cm_d = "CM_VIS06"
 cm_dt = int8
 
-asp_p = map(lambda x: 'AL-' + x, ALL_VIS_CHN)
+asp_p = ['AL-' + x for x in ALL_VIS_CHN]
 
 aer_p = [ "Aerosol Optical Depth - 635nm", "(beta) Aerosol Optical Depth - 810nm", "(beta) Aerosol Optical Depth - 1640nm",
           "AOD Uncertainty - 635nm"      , "AOD Uncertainty - 810nm"             , "AOD Uncertainty - 1640nm"              ]
@@ -168,7 +172,7 @@ def compare_inputs(a,b):
 def print_reading_info(obj, fpath): print_info('Reading', 'from', obj, fpath)
 def print_writing_info(obj, fpath): print_info('Writing', 'to  ', obj, fpath)
 def print_info(action, direction, obj, fpath):
-    print '  - %s %23s %s file %s' % (action, obj, direction, fpath)
+    print('  - %s %23s %s file %s' % (action, obj, direction, fpath))
 
 def init_vis_chn(cfg):
     if cfg['ACCELERATE']: cfg['NCHANNELS'] = 1
