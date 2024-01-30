@@ -2016,26 +2016,15 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                                        NN = NN+1
 
                                        phFunc = phaseFunc_value(scat_ang(N),I)
-
-                                       ! RTM from Katsev et al. 2010
+                                       
                                        us = Cos(theta_sol(N))
                                        uv = Cos(theta_sat(N))
-                                       x1_tilde = 3.*g_tilde(aod_pos,I)
-                                       ! Aerosol transmittances
-                                       TS = exp(-tau_0_tilde*(1.-ssa_tilde(aod_pos,I)*(1.-(1.-g_tilde(aod_pos,I))/2.))/us)
-                                       TV = exp(-tau_0_tilde*(1.-ssa_tilde(aod_pos,I)*(1.-(1.-g_tilde(aod_pos,I))/2.))/uv)
-                                       ! Spherical albedo
-                                       Salb = tau_0_tilde/(tau_0_tilde+4./(3.-x1_tilde))
-                                       ! Calculation of aerosol/surface coefficient
-                                       trans_coeff = TS*TV/(1.-Salb*albed_b_in_)
-                                       ! Aerosol reflectance
-                                       ! - Single scattering (without SSA and phase function)
-                                       rho_1 = 1./(4.*(us+uv))*(1.-exp(-tau_0_tilde*(1./us+1./uv)))
-                                       ! - Multiple scattering
-                                       R_MS_us = 1.+1.5*us+(1.-1.5*us)*exp(-tau_0_tilde/us)
-                                       R_MS_uv = 1.+1.5*uv+(1.-1.5*uv)*exp(-tau_0_tilde/uv)
-                                       R_MS = 1.-R_MS_us*R_MS_uv/(4.+(3.-x1_tilde)*tau_0_tilde) &
-                                          & +((3.+x1_tilde)*us*uv-2.*(us+uv))*rho_1
+
+                                       ! RTM from Katsev et al. 2010
+                                       call calculate_r_ms(&
+                                          ssa_tilde(aod_pos,I), g_tilde(aod_pos,I), &
+                                          tau_0_tilde, albed_b_in_, uv, us, &
+                                          rho_1, trans_coeff, R_MS)                                         
 
                                        A_(NN, 0:MM-1) = brdfmodel(theta_sat(N), theta_sol(N), phi_sat(N), phi_sol(N), phi_del(N), &
                                           & wspeed(N), wdir(N), I, model, ocean_flag, .True.) / sigrefl_(N)
