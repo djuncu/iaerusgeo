@@ -8,16 +8,16 @@ One of the changes is that python parts of the code are now python3, no longer p
 
 The adaption requires a few changes in usage:
 
-## Compilation
+### Compilation
 (there should be a cleaner way to do this, but for now it works)
 ```bash
 make clear && make clean && make && ./make.sh
 ```
 
-## Execution
+### Execution
 To use FLOTSAM add -F flag when executing tools/script_prod.sh
 
-## Ancillary data
+### Ancillary data
 Ancillary files are not currently part of the repo, due to the size. For the code to run properly, french characters need to be removed from the following files:
 - ```ancillary/solar_eclipses.dat```
 - ```ancillary/invalid_slots.dat```
