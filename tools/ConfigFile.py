@@ -135,7 +135,7 @@ class Config(object):
                                 self.cfg[k] = values
                             for i in range(len(values)):
                                 val = values[i].strip()
-                                if val is '': val = default
+                                if val == '': val = default
                                 else: val = self.typevar(val, dtype)
                                 if i < len(self.cfg[k]): self.cfg[k][i] = val
                                 else: self.cfg[k].append(val)
@@ -164,7 +164,7 @@ class Config(object):
             for k in list(indict.keys()):
                 if len(indict[k][1]) == 0: continue
                 if opt[0][1] == indict[k][1][0]:
-                    if opt[1] is '' and indict[k][0] == 'int': dopt[k] = '1'
+                    if opt[1] == '' and indict[k][0] == 'int': dopt[k] = '1'
                     else: dopt[k] = opt[1]
                     break
         self.update(indict, dopt, "command line")

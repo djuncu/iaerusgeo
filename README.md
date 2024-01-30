@@ -1,6 +1,29 @@
 CHAINE AERUS-L3
 ===============
 
+UPDATE NOTE
+-----------
+This version of iAERUS-GEO has been adapted to be used with FLOTSAM as RTM in addtion to MSA.
+One of the changes is that python parts of the code are now python3, no longer python2.
+
+The adaption requires a few changes in usage:
+
+## Compilation
+(there should be a cleaner way to do this, but for now it works)
+```bash
+make clear && make clean && make && ./make.sh
+```
+
+## Execution
+To use FLOTSAM add -F flag when executing tools/script_prod.sh
+
+## Ancillary data
+Ancillary files are not currently part of the repo, due to the size. For the code to run properly, french characters need to be removed from the following files:
+- ```ancillary/solar_eclipses.dat```
+- ```ancillary/invalid_slots.dat```
+
+And a new lookup file needs to be added: ```ancillary/aer_opt_lut_flotsam.h5```
+
 
 DESCRIPTIF
 ----------
