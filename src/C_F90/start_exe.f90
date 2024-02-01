@@ -483,7 +483,7 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
          End If
 
          Do X = 1, MSGpixX
-            print*, 'PROCESSING PIXEL ', X, Y
+            !print*, 'PROCESSING PIXEL ', X, Y
 
             ! Are coast pixels processed?
             if (.not. COAST_OK .and. coast_pix(X, Y) .eq. 1) Then

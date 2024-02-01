@@ -246,7 +246,7 @@ while [ $dt != $dfin ]; do
 #    process "(time python src/FMK_AerusL3.py -Y 1,96,111,180,217,360,515,578,583 -g MSG+0000 $PCFFIL) &> $LOGFIL"
     #process "(time python src/FMK_AerusL3.py -g MSG+0000 $PCFFIL) &> $LOGFIL"
     #process "(time python src/FMK_AerusL3_flotsam.py -g MSG+0000 $PCFFIL) &> $LOGFIL"
-    process "(time python src/FMK_AerusL3.py -g MSG+0000 $PCFFIL)"
+    process "(time python src/FMK_AerusL3.py -g MSG+0000 $PCFFIL) &> $LOGFIL"
 
     process "rm -f $TMP_DIR/*"
 
