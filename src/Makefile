@@ -44,7 +44,7 @@ SRC =	$(NR)/nrtype.f90		\
 	$(S)/brdfmodels.f90		\
 	$(S)/invers.f90			\
 	$(S)/LM.f90			\
-	$(S)/flotsam_interface.f90			\
+	$(S)/flotsam_interface.f90	\
 	$(S)/calculate_ref_tol.f90	\
 	$(S)/start_mod.f90		\
 	$(S)/aerosol_parameters.f90	\

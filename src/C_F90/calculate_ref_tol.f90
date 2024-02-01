@@ -34,7 +34,6 @@ Subroutine calculate_r_ms(ssa_tilde,g_tilde,tau0_tilde,albed_b_in, uv,us, rho_1,
   Implicit None
   Real, Intent(In)     :: ssa_tilde,g_tilde,tau0_tilde, albed_b_in, uv,us
   Real, Intent(InOut)  :: R_MS, trans_coeff, rho_1
-
   Real :: TS, TV, Salb, x1_tilde, R_MS_us, R_MS_uv
 
     x1_tilde = 3.*g_tilde
@@ -53,6 +52,5 @@ Subroutine calculate_r_ms(ssa_tilde,g_tilde,tau0_tilde,albed_b_in, uv,us, rho_1,
     R_MS_us = 1. + 1.5*us + (1.-1.5*us)*exp(-tau0_tilde/us)
     R_MS_uv = 1. + 1.5*uv + (1.-1.5*uv)*exp(-tau0_tilde/uv)
     R_MS = 1. - R_MS_us*R_MS_uv/(4.+(3.-x1_tilde)*tau0_tilde) + ((3.+x1_tilde)*us*uv-2.*(us+uv))*rho_1
-
 
 End Subroutine calculate_r_ms

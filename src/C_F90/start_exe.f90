@@ -39,7 +39,8 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
    Real :: pf_smoo_pix_contiguous(n_sca,1), pf_cmp_pix_contiguous(n_pfc,1)
    Real :: ssa_pix(N_channels, n_aod), pf_interp !, sca
    integer :: i_aero_1, i_aero_2, i_aero_3, iprof, iband
-
+   real :: t1, t2, tmp_real, k_daily(0:MM), tau_daily
+   
    External reportLog, getStopStatus, stopping
 
    ! number of lines to be read
@@ -482,7 +483,7 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
          End If
 
          Do X = 1, MSGpixX
-            !print*, 'PROCESSING PIXEL ', X, Y
+            print*, 'PROCESSING PIXEL ', X, Y
 
             ! Are coast pixels processed?
             if (.not. COAST_OK .and. coast_pix(X, Y) .eq. 1) Then
@@ -598,8 +599,8 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
             endif
 
             ! juncud:12Dec2023: need RTM switch here
-            ! switched the switches for testing...! should be 1->2
-            if (rtm_switch .eq. 1) then
+            ! for FLOTSAM daily now running the first part as well... for testing.
+            if (rtm_switch .eq. 1 .or. rtm_switch .eq. 2) then
                ! Three possibilities with aerosol models
                If (flag_aer_type_3) Then ! Three models exist
                   weight_mod_1 = 1.0 - weight_mod_2 - weight_mod_3
@@ -615,8 +616,9 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                   If (aer_type_1 .ne. aer_type_prev_1) Call aerosol_parameters_init(aer_type_1,1.0,-1,0.0,-1,0.0)
                   aer_type_prev_1 = aer_type_1
                EndIf
+            end if
             
-            else if (rtm_switch .eq. 2) then
+            if (rtm_switch .eq. 2) then
                !allocate(pf_raw_pix(N_channels, n_sca, n_aod))
 
                ! Here we obtain 3 variables:
@@ -1696,13 +1698,14 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
 
                                  cpt_tau = 1
                                  cpt_tau_conv = 8
-                                 cpt_tau_max = 30
+                                 cpt_tau_max = 30 
 
                                  if (debug_flag) print*, 'Previous k:', k_in
 
                                  ! begin loop for solution convergence
                                  if (debug_flag) print *, 'Convergence loop starts'
                                  Do While (cpt_tau .le. cpt_tau_max)
+                                    !print*, 'CONVERGENCE LOOP'
 
                                     convergence_OK = (ABS(k(3)-tau_0) .lt. delta_tau) .and. (ABS(k(3)-tau_1) .lt. delta_tau)
                                     limit_AOD = (k(3) .eq. AOD_min) .or. (k(3) .eq. AOD_max)
@@ -1740,7 +1743,7 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
 
                                     ! Saving previous inversion
                                     tau_1 = tau_0
-                                    tau_0 = k(3)
+                                    tau_0 = k(3)                                   
 
                                     ! calculation of AOD tilde
                                     aod_pos = MINLOC(ABS(AOD_max_steps-tau_0), DIM=1)
@@ -1748,36 +1751,77 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
 
                                     ! fill matrix A and vector b
                                     NN = 0
-                                    Do N = 1, N_scenes
+                                    Do N = 1, N_scenes                                       
                                        If (valid(N)) Then
                                           NN = NN+1
 
                                           phFunc = phaseFunc_value(scat_ang(N),I)
-
-                                          ! RTM from Katsev et al. 2010
+  
                                           us = Cos(theta_sol(N))
                                           uv = Cos(theta_sat(N))
-                                          x1_tilde = 3.*g_tilde(aod_pos,I)
-                                          ! Aerosol transmittances 
-                                          TS = exp(-tau_0_tilde*(1.-ssa_tilde(aod_pos,I)*(1.-(1.-g_tilde(aod_pos,I))/2.))/us)
-                                          TV = exp(-tau_0_tilde*(1.-ssa_tilde(aod_pos,I)*(1.-(1.-g_tilde(aod_pos,I))/2.))/uv)
-                                          ! Spherical albedo
-                                          Salb = tau_0_tilde/(tau_0_tilde+4./(3.-x1_tilde))
-                                          ! Calculation of aerosol/surface coefficient
-                                          trans_coeff = TS*TV/(1.-Salb*albed_b_in)
-                                          ! Aerosol reflectance
-                                          ! - Single scattering (without SSA and phase function)
-                                          rho_1 = 1./(4.*(us+uv))*(1.-exp(-tau_0_tilde*(1./us+1./uv)))
-                                          ! - Multiple scattering
-                                          R_MS_us = 1.+1.5*us+(1.-1.5*us)*exp(-tau_0_tilde/us)
-                                          R_MS_uv = 1.+1.5*uv+(1.-1.5*uv)*exp(-tau_0_tilde/uv)
-                                          R_MS = 1.-R_MS_us*R_MS_uv/(4.+(3.-x1_tilde)*tau_0_tilde) &
-                                             & +((3.+x1_tilde)*us*uv-2.*(us+uv))*rho_1
+                                          
+                                          if (rtm_switch .eq. 1) then
+                                             ! RTM from Katsev et al. 2010
+                                             call calculate_r_ms(&
+                                                ssa_tilde(aod_pos,I), g_tilde(aod_pos,I), &
+                                                tau_0_tilde, albed_b_in_, uv, us, &
+                                                rho_1, trans_coeff, R_MS)                                                 
+                                             !print*, 'rho 1, tc, r_ms: ', rho_1, trans_coeff, R_MS
 
-                                          A(NN, 0:MM) = brdfmodel_aerosol(theta_sat(N), theta_sol(N), phi_sat(N), phi_sol(N), phi_del(N), &
-                                             & wspeed(N), wdir(N), I, model, ocean_flag, tau_0_tilde, g(aod_pos,I), ssa_tilde(aod_pos,I), &
-                                             & trans_coeff, eta(aod_pos,I), phFunc(aod_pos), .False.)/sigrefl(N)
-                                          b(NN) = (refl(N)-R_MS)/trans_coeff/sigrefl(N)
+                                             A(NN, 0:MM) = brdfmodel_aerosol(theta_sat(N), theta_sol(N), phi_sat(N), phi_sol(N), phi_del(N), &
+                                                & wspeed(N), wdir(N), I, model, ocean_flag, tau_0_tilde, g(aod_pos,I), ssa_tilde(aod_pos,I), &
+                                                & trans_coeff, phFunc(aod_pos)/(1-eta(aod_pos,I)), .False.)/sigrefl(N)
+                                             b(NN) = (refl(N)-R_MS)/trans_coeff/sigrefl(N)
+
+                                          else if (rtm_switch .eq. 2) then 
+                                             !call cpu_time(t1)                                                              
+                                             if (cpt_tau .eq. 1) then  
+                                                k_daily = k_in      
+                                             else 
+                                                k_daily = k                                                
+                                             end if
+                                             ref_s = dot_product(&
+                                                brdfmodel(theta_sat(N), theta_sol(N),&
+                                                   phi_sat(N), phi_sol(N), phi_del(N),&
+                                                   wspeed(N), wdir(N), I, model, & 
+                                                   ocean_flag, .False.),&
+                                                k_daily(0:2))
+                                             ! if ref_s is 0 or below, use TOL reflectance
+                                             ! instead (double check if still necessary)
+                                             if (ref_s .le. 0) then                                                 
+                                                ref_s = (reflectance(X, Y, I, N)+ Offset_Ref(N)) / Scale_Ref(N)
+                                             end if                  
+
+                                             ! Flotsam does not like AOD=0
+                                             ! need to investigate what effect the 
+                                             ! choice of value has
+                                             if (tau_0 .eq. 0.0) then 
+                                                tau_daily = 0.005
+                                             else 
+                                                tau_daily = tau_0
+                                             end if
+                                                   
+                                             !print*, theta_sat(N), phi_del(N), I, model
+                                             !print*, 'REF S: ', ref_s, k_in    
+                                             call run_flotsam_daily(&
+                                                ssa_pix, pf_components_pix, pf_smooth_pix, & 
+                                                uv, us, phi_sol(N), phi_sat(N), scat_ang(N), &
+                                                ref_s, &   
+                                                tau_daily, AOD_max_steps, &
+                                                !debug_flag, &                                           
+                                                I, 1, n_sca, n_aod, n_pfc, & 
+                                                rho_1, trans_coeff, R_MS)
+
+                                             A(NN, 0:MM) = brdfmodel_aerosol(theta_sat(N), theta_sol(N), phi_sat(N), phi_sol(N), phi_del(N), &
+                                                & wspeed(N), wdir(N), I, model, ocean_flag, tau_0, g(aod_pos,I), ssa(aod_pos,I), &
+                                                & trans_coeff, phFunc(aod_pos), .False.)/sigrefl(N)
+                                             b(NN) = (refl(N)-R_MS)/trans_coeff/sigrefl(N)
+
+                                             !call cpu_time(t2)                                             
+                                             !print*, 'CPU TIME: ', t2-t1, ' s'
+
+                                          end if 
+
                                           if (A(NN, 3) .eq. 0) then
                                              A(NN, 0:MM) = 0.0000001
                                              b(NN) = 0.0000001
@@ -1841,6 +1885,7 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                                     ! use of regulation factor to constrain lambertian reflectance over ocean and to impose positive matrix at the initialisation
                                     k = Matmul(Ck_ite, Matmul(AT(0:MM, 1:N_valid_obs), b(1:N_valid_obs)) + &
                                             & Matmul(CkI_tau, k_in) + Matmul(CkI_reg_i, k_reg))
+                                    !print*, k(3)
 
 !                                    print*, 'Ck_ite', Ck_ite
 !                                    print*, 'Matmul(AT(0:MM, 1:N_valid_obs), b(1:N_valid_obs))', Matmul(AT(0:MM, 1:N_valid_obs), b(1:N_valid_obs))
@@ -1852,7 +1897,7 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                                     ! aod_pos = MINLOC(ABS(AOD_max_steps-k(3)), DIM=1) -> Wrong, as 'aod_pos' should correspond to 'tau' and not 'tau_tilde'
                                     ! By doing nothing, we use 'tau_0', which is the previous value of AOD.
                                     ! This is not totally correct either but it is better because AOD should not change much from one iteration to the other
-                                    k(3) = k(3)/(1.-ssa(aod_pos,I)*eta(aod_pos,I))
+                                    k(3) = k(3)/(1.-ssa(aod_pos,I)*eta(aod_pos,I))                                    
                                   
                                     ! calculating fitting error
                                     aod_pos = MINLOC(ABS(AOD_max_steps-k(3)), DIM=1)
@@ -1871,7 +1916,7 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                                           ref_s = dot_product(brdfmodel(theta_sat(N), theta_sol(N), phi_sat(N), phi_sol(N), phi_del(N), &
                                              & wspeed(N), wdir(N), I, model, ocean_flag, .False.), k(0:2))
                                           P_tilde = phaseFunc_value(scat_ang(N),I)/(1.-eta(aod_pos,I))
-                                          print*, 'DAILY FLOTSAM REFL'
+                                          !print*, 'DAILY FLOTSAM REFL'
                                           !print*, k(3), I, aod_pos, i_aero_1
                                           ! question: do we pass k(3) as AOD here?
                                           pf_cmp_pix_contiguous = reshape(&
@@ -1894,7 +1939,7 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                                             ! & g_tilde(aod_pos,I), tau_0_tilde, albed_b_in, &
                                             ! & Cos(theta_sat(N)), Cos(theta_sol(N)), ref_tol)
                                           fit_error = fit_error + abs(refl(N)-ref_tol)
-                                          print*, 'TOL REF: ', ref_tol
+                                          !print*, 'TOL REF: ', ref_tol
 
                                           P_tilde_j = phaseFunc_value(scat_ang(N),I)/(1.-eta(aod_pos_j,I))
                                           ! The second call to calculate_ref_tol is unnecessary
@@ -2020,16 +2065,51 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                                        us = Cos(theta_sol(N))
                                        uv = Cos(theta_sat(N))
 
-                                       ! RTM from Katsev et al. 2010
-                                       call calculate_r_ms(&
-                                          ssa_tilde(aod_pos,I), g_tilde(aod_pos,I), &
-                                          tau_0_tilde, albed_b_in_, uv, us, &
-                                          rho_1, trans_coeff, R_MS)                                         
+                                       if (rtm_switch .eq. 1) then
+                                          ! RTM from Katsev et al. 2010
+                                          call calculate_r_ms(&
+                                             ssa_tilde(aod_pos,I), g_tilde(aod_pos,I), &
+                                             tau_0_tilde, albed_b_in_, uv, us, &
+                                             rho_1, trans_coeff, R_MS)                                         
 
-                                       A_(NN, 0:MM-1) = brdfmodel(theta_sat(N), theta_sol(N), phi_sat(N), phi_sol(N), phi_del(N), &
-                                          & wspeed(N), wdir(N), I, model, ocean_flag, .True.) / sigrefl_(N)
-                                       b_(NN) = (refl(N) - ssa_tilde(aod_pos,I)*phFunc(aod_pos)/(1.-eta(aod_pos,I))*rho_1 &
-                                             & - R_MS) / trans_coeff / sigrefl_(N)
+                                          A_(NN, 0:MM-1) = brdfmodel(theta_sat(N), theta_sol(N), phi_sat(N), phi_sol(N), phi_del(N), &
+                                             & wspeed(N), wdir(N), I, model, ocean_flag, .True.) / sigrefl_(N)
+                                          b_(NN) = (refl(N) - ssa_tilde(aod_pos,I)*phFunc(aod_pos)/(1.-eta(aod_pos,I))*rho_1 &
+                                                & - R_MS) / trans_coeff / sigrefl_(N)
+
+                                       else if (rtm_switch .eq. 2) then 
+                                          if (cpt_tau .eq. 1) then  
+                                             k_daily = k_in_      
+                                          else 
+                                             k_daily(0:2) = k_                                                
+                                          end if
+                                          ref_s_ = dot_product(&
+                                             brdfmodel(theta_sat(N), theta_sol(N),&
+                                                phi_sat(N), phi_sol(N), phi_del(N),&
+                                                wspeed(N), wdir(N), I, model, & 
+                                                ocean_flag, .False.),&
+                                             k_daily(0:2))
+                                          ! if ref_s is 0 or below, use TOL reflectance
+                                          ! instead
+                                          if (ref_s_ .le. 0) then                                                 
+                                             ref_s_ = (reflectance(X, Y, I, N)+ Offset_Ref(N)) / Scale_Ref(N)
+                                          end if     
+
+                                          call run_flotsam_daily(&
+                                             ssa_pix, pf_components_pix, pf_smooth_pix, & 
+                                             uv, us, phi_sol(N), phi_sat(N), scat_ang(N), &
+                                             ref_s_, &                                            
+                                             tau_0, AOD_max_steps,&
+                                             !debug_flag, &                                           
+                                             I, 1, n_sca, n_aod, n_pfc, & 
+                                             rho_1, trans_coeff, R_MS)
+
+                                          A_(NN, 0:MM-1) = brdfmodel(theta_sat(N), theta_sol(N), phi_sat(N), phi_sol(N), phi_del(N), &
+                                             & wspeed(N), wdir(N), I, model, ocean_flag, .True.) / sigrefl_(N)
+                                          b_(NN) = (refl(N) - ssa(aod_pos,I)*phFunc(aod_pos)*rho_1 &
+                                                & - R_MS) / trans_coeff / sigrefl_(N)
+
+                                       end if
                                     End If
                                  End Do
 

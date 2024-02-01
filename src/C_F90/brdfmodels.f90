@@ -76,40 +76,40 @@ Contains
 
   End Function brdfmodel_ocean
 
-  Function brdfmodel_aerosol(theta_obs, theta_sun, phi_obs, phi_sun, phi_del, wind_speed, phiw, I, model, ocean_flag, tau0, g_, ssa_, trans_coeff, eta, phFunc, instantaneous)
+  Function brdfmodel_aerosol(theta_obs, theta_sun, phi_obs, phi_sun, phi_del, wind_speed, phiw, I, model, ocean_flag, tau0, g_, ssa_, trans_coeff, phFunc, instantaneous)
     Implicit None
 
-    Real, Intent(In)      :: theta_obs, theta_sun, phi_obs, phi_sun, phi_del, wind_speed, phiw, tau0, g_, ssa_, trans_coeff, eta, phFunc
+    Real, Intent(In)      :: theta_obs, theta_sun, phi_obs, phi_sun, phi_del, wind_speed, phiw, tau0, g_, ssa_, trans_coeff, phFunc
     Integer, Intent(In)  :: model, I
     Logical, Intent(In)  :: ocean_flag, instantaneous ! flag for land/water mask
     Real, Dimension(0:3) :: brdfmodel_aerosol
 
     If (ocean_flag) Then
-      brdfmodel_aerosol = brdfmodel_ocean_aerosol(theta_obs, theta_sun, phi_obs, phi_sun, phi_del, wind_speed, phiw, I, model, tau0, g_, ssa_, trans_coeff, eta, phFunc)
+      brdfmodel_aerosol = brdfmodel_ocean_aerosol(theta_obs, theta_sun, phi_obs, phi_sun, phi_del, wind_speed, phiw, I, model, tau0, g_, ssa_, trans_coeff, phFunc)
     Else
-      brdfmodel_aerosol = brdfmodel_land_aerosol(theta_obs, phi_del, theta_sun, model, tau0, g_, ssa_, trans_coeff, eta, phFunc, instantaneous)
+      brdfmodel_aerosol = brdfmodel_land_aerosol(theta_obs, phi_del, theta_sun, model, tau0, g_, ssa_, trans_coeff, phFunc, instantaneous)
     Endif
 
   End Function brdfmodel_aerosol
 
-  Function brdfmodel_land_aerosol(theta_obs, phi_del, theta_sun, model_land, tau0, g_, ssa_, trans_coeff, eta, phFunc, instantaneous)
+  Function brdfmodel_land_aerosol(theta_obs, phi_del, theta_sun, model_land, tau0, g_, ssa_, trans_coeff, phFunc, instantaneous)
     Implicit None
   
-    Real, Intent(In)     :: theta_obs, phi_del, theta_sun, tau0, g_, ssa_, trans_coeff, eta, phFunc
+    Real, Intent(In)     :: theta_obs, phi_del, theta_sun, tau0, g_, ssa_, trans_coeff, phFunc
     Integer, Intent(In)  :: model_land
     Real, Dimension(0:3) :: brdfmodel_land_aerosol
     Logical, Intent(In)  :: instantaneous
 
     Select Case (model_land)
      Case (1)
-       brdfmodel_land_aerosol = roujean_aerosol(theta_obs, phi_del, theta_sun, tau0, g_, ssa_, trans_coeff, eta, phFunc)
+       brdfmodel_land_aerosol = roujean_aerosol(theta_obs, phi_del, theta_sun, tau0, g_, ssa_, trans_coeff, phFunc)
      Case (2)
-       brdfmodel_land_aerosol = rtls_aerosol(theta_obs, phi_del, theta_sun, tau0, g_, ssa_, trans_coeff, eta, phFunc)
+       brdfmodel_land_aerosol = rtls_aerosol(theta_obs, phi_del, theta_sun, tau0, g_, ssa_, trans_coeff, phFunc)
      Case (3)
        if (instantaneous) then
-         brdfmodel_land_aerosol = lirosshotspot_aerosol(theta_obs, phi_del, theta_sun, tau0, g_, ssa_, trans_coeff, eta, phFunc, 1.5)
+         brdfmodel_land_aerosol = lirosshotspot_aerosol(theta_obs, phi_del, theta_sun, tau0, g_, ssa_, trans_coeff, phFunc, 1.5)
        Else
-         brdfmodel_land_aerosol = lirosshotspot_aerosol(theta_obs, phi_del, theta_sun, tau0, g_, ssa_, trans_coeff, eta, phFunc, 1.5)
+         brdfmodel_land_aerosol = lirosshotspot_aerosol(theta_obs, phi_del, theta_sun, tau0, g_, ssa_, trans_coeff, phFunc, 1.5)
        Endif
      Case Default
        print *, 'wrong BRDF model for land'  
@@ -118,16 +118,16 @@ Contains
 
   End Function brdfmodel_land_aerosol
 
-  Function brdfmodel_ocean_aerosol(theta_obs, theta_sun, phi_obs, phi_sun, phi_del, wind_speed, phiw, I, model_ocean, tau0, g_, ssa_, trans_coeff, eta, phFunc)
+  Function brdfmodel_ocean_aerosol(theta_obs, theta_sun, phi_obs, phi_sun, phi_del, wind_speed, phiw, I, model_ocean, tau0, g_, ssa_, trans_coeff, phFunc)
     Implicit None
   
-    Real, Intent(In)     :: theta_obs, theta_sun, phi_obs, phi_sun, phi_del, wind_speed, phiw, tau0, g_, ssa_, trans_coeff, eta, phFunc
+    Real, Intent(In)     :: theta_obs, theta_sun, phi_obs, phi_sun, phi_del, wind_speed, phiw, tau0, g_, ssa_, trans_coeff, phFunc
     Integer, Intent(In)  :: model_ocean, I
     Real, Dimension(0:3) :: brdfmodel_ocean_aerosol
 
     Select Case (model_ocean)
      Case (1)
-       brdfmodel_ocean_aerosol = coxmunk_aerosol(theta_obs, theta_sun, phi_obs, phi_sun, phi_del, wind_speed, phiw, I, tau0, g_, ssa_, trans_coeff, eta, phFunc)
+       brdfmodel_ocean_aerosol = coxmunk_aerosol(theta_obs, theta_sun, phi_obs, phi_sun, phi_del, wind_speed, phiw, I, tau0, g_, ssa_, trans_coeff, phFunc)
      Case Default
        print *, 'wrong BRDF model for ocean'
        stop 
@@ -421,11 +421,11 @@ Contains
   End Function coxmunk
 
   ! BRDF kernel model from Roujean, Leroy, and Deschamps (1992) plus an aerosol kernel using a double Henyey-Greenstein phase function
-  Function roujean_aerosol(theta_obs, phi_del, theta_sun, tau0, g_, ssa_, trans_coeff, eta, phFunc)
+  Function roujean_aerosol(theta_obs, phi_del, theta_sun, tau0, g_, ssa_, trans_coeff, phFunc)
     Implicit None
     
     Real, Intent(In)  :: theta_obs, phi_del, theta_sun
-    Real, Intent(In)  :: g_, ssa_, trans_coeff, eta, tau0, phFunc
+    Real, Intent(In)  :: g_, ssa_, trans_coeff, tau0, phFunc
 
     Real, Dimension(0:3) :: roujean_aerosol
     
@@ -465,7 +465,7 @@ Contains
     !aerosol kernel
 !    p=(1.-g_**2)/(1.+g_**2-2.*g_*cos(pi-phaseAng))**1.5 + (1.-g_**2)*f_2HG*(3.*cos(pi-phaseAng)**2.0-1.0)/(2.0*(1.+g_**2.)**1.5)
     p=phFunc
-    p=p/(1.-eta) ! truncation
+    !p=p/(1.-eta) ! truncation
     nu=1./cos_tobs+1./cos_tsun
     exp_x=(840.-60.*(tau0*nu)+20.*(tau0*nu)**2-(tau0*nu)**3)/(840.+360.*(tau0*nu)+60.*(tau0*nu)**2+4*(tau0*nu)**3)
 !    roujean_aerosol(3) =ssa_/4./cos_tsun/cos_tobs*p*exp_x*(1.+(7.-tau0)*tau0/5.)
@@ -480,12 +480,12 @@ Contains
   End Function roujean_aerosol 
 
   ! BRDF kernel model from Lutch et al. (2000) plus an aerosol kernel using a double Henyey-Greenstein phase function
-  Function rtls_aerosol(theta_obs, phi_del, theta_sun, tau0, g_, ssa_, trans_coeff, eta, phFunc)
+  Function rtls_aerosol(theta_obs, phi_del, theta_sun, tau0, g_, ssa_, trans_coeff, phFunc)
     Implicit None
   
     Real, Intent(In)     :: theta_obs, phi_del, theta_sun
     Real, Dimension(0:3) :: rtls_aerosol
-    Real, Intent(In)  :: g_, ssa_, trans_coeff, eta, tau0, phFunc
+    Real, Intent(In)  :: g_, ssa_, trans_coeff, tau0, phFunc
 
     Real, Parameter :: pi           = 3.141592653589793238462643383279502884197
     Real, Parameter :: one_two      = 1./2.
@@ -535,7 +535,7 @@ Contains
    ! aerosol kernel
 !    p=(1.-g_**2)/(1.+g_**2-2.*g_*cos(pi-phaseAng))**1.5 + (1.-g_**2)*f_2HG*(3.*cos(pi-phaseAng)**2.0-1.0)/(2.0*(1.+g_**2.)**1.5)
     p=phFunc
-    p=p/(1.-eta) ! truncation
+    !p=p/(1.-eta) ! truncation
     nu=1./cos_tobs+1./cos_tsun
     exp_x=(840.-60.*(tau0*nu)+20.*(tau0*nu)**2-(tau0*nu)**3)/(840.+360.*(tau0*nu)+60.*(tau0*nu)**2+4*(tau0*nu)**3)
 !    rtls_aerosol(3) =ssa_/4./cos_tsun/cos_tobs*p*exp_x*(1.+(7.-tau0)*tau0/5.)
@@ -550,12 +550,12 @@ Contains
   End Function rtls_aerosol
 
   ! BRDF kernel model with hot spot from Maignan et al. (2004) plus an aerosol kernel using a double Henyey-Greenstein phase function
-  Function lirosshotspot_aerosol(theta_obs, phi_del, theta_sun, tau0, g_, ssa_, trans_coeff, eta, phFunc, xi_0)
+  Function lirosshotspot_aerosol(theta_obs, phi_del, theta_sun, tau0, g_, ssa_, trans_coeff, phFunc, xi_0)
     Implicit None
   
     Real, Intent(In)     :: theta_obs, phi_del, theta_sun, xi_0
     Real, Dimension(0:3) :: lirosshotspot_aerosol
-    Real, Intent(In)  :: g_, ssa_, trans_coeff, eta, tau0, phFunc
+    Real, Intent(In)  :: g_, ssa_, trans_coeff, tau0, phFunc
     
     Real, Parameter :: pi           = 3.141592653589793238462643383279502884197
     Real, Parameter :: four_threepi = 4./(3.*pi)
@@ -601,7 +601,7 @@ Contains
     !aerosol kernel
 !    p=(1.-g_**2)/(1.+g_**2-2.*g_*cos(pi-phaseAng))**1.5 + (1.-g_**2)*f_2HG*(3.*cos(pi-phaseAng)**2.0-1.0)/(2.0*(1.+g_**2.)**1.5)
     p=phFunc
-    p=p/(1.-eta) ! truncation
+    !p=p/(1.-eta) ! truncation
     nu=1./cos_tobs+1./cos_tsun
     exp_x=(840.-60.*(tau0*nu)+20.*(tau0*nu)**2-(tau0*nu)**3)/(840.+360.*(tau0*nu)+60.*(tau0*nu)**2+4*(tau0*nu)**3)
 !    lirosshotspot_aerosol(3) =ssa_/4./cos_tsun/cos_tobs*p*exp_x*(1.+(7.-tau0)*tau0/5.)
@@ -620,13 +620,13 @@ Contains
   ! 2nd kernel: Fresnel reflection (Sun glint)
   ! 3rd kernel: none
   ! 4th kernel: aerosols
-  Function coxmunk_aerosol(theta_obs, theta_sun, phi_obs, phi_sun, phi_del, wind_speed, phiw, I, tau0, g_, ssa_, trans_coeff, eta, phFunc)
+  Function coxmunk_aerosol(theta_obs, theta_sun, phi_obs, phi_sun, phi_del, wind_speed, phiw, I, tau0, g_, ssa_, trans_coeff, phFunc)
     Implicit None
   
     Real, Intent(In)     :: theta_obs, theta_sun, phi_obs, phi_sun, phi_del, wind_speed, phiw
     Integer, Intent(In)  :: I
     Real, Dimension(0:3) :: coxmunk_aerosol
-    Real, Intent(In)  :: g_, ssa_, trans_coeff, eta, tau0, phFunc
+    Real, Intent(In)  :: g_, ssa_, trans_coeff, tau0, phFunc
     
     Real, Parameter :: pi           = 3.141592653589793238462643383279502884197
   
@@ -774,7 +774,7 @@ Contains
 
     ! 4th (and aerosol) kernel
     p=phFunc
-    p=p/(1.-eta) ! truncation
+    !p=p/(1.-eta) ! truncation
     nu=1./muv+1./mu0
     exp_x=(840.-60.*(tau0*nu)+20.*(tau0*nu)**2-(tau0*nu)**3)/(840.+360.*(tau0*nu)+60.*(tau0*nu)**2+4*(tau0*nu)**3)
     coxmunk_aerosol(3) =ssa_/4./mu0/muv*p*exp_x

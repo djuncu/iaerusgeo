@@ -33,12 +33,6 @@ subroutine LM_flotsam(&
     i_channel, &
     n_aero_layers, n_sca, n_aod, n_pfc) !sa, tau_ap)
 
-    !Use py_ifc
-    !Use iso_c_binding
-    !Use start_mod
-    !Use tol_reflectance
-    !Use aerosol_parameters
-
     implicit none
     !Real, Intent(In) :: sa, tau_ap
     integer :: kk
@@ -117,6 +111,7 @@ subroutine LM_flotsam(&
         us, sca, ref_s, &
         tau_apriori, i_channel, iband, &
         n_sca, n_pfc, n_aod, n_aero_layers, &
+        .True., &
         !n_layers, &
         ref_tol_calc, jac)
 
@@ -129,7 +124,6 @@ subroutine LM_flotsam(&
     !-----------------------  Levenberg - Marquardt  -------------------------
     ! --> Calcul de xi_plus_1
     call calc_xi(x, x_apriori, jac, ref_tol_obs, ref_tol_calc, Sy, Sa, gamma_lm, x_plus_1)
-    !call calc_xi_2(x, x_apriori, jac, rad_tol_obs, rad_tol_calc, Sy, Sa, gamma_lm, x_plus_1)
     x=x_plus_1
     IF (debug_flag) print*,"Initialisation de x_plus_1 =",x_plus_1 
 
@@ -143,6 +137,7 @@ subroutine LM_flotsam(&
             us, sca, ref_s, &
             tau_plus_1, i_channel, iband, &
             n_sca, n_pfc, n_aod, n_aero_layers, &
+            .True., &
             !n_layers, &
             ref_tol_calc, jac)
         
@@ -163,6 +158,7 @@ subroutine LM_flotsam(&
                 us, sca, ref_s, &
                 tau_plus_1, i_channel, iband,&
                 n_sca, n_pfc, n_aod, n_aero_layers, &
+                .True., &
                 !n_layers, &
                 ref_tol_calc, jac)
                 !print*, iter1, iter2, ' INNER FLOTSAM REFL / TAU: ', ref_tol_calc, tau_plus_1
@@ -176,8 +172,6 @@ subroutine LM_flotsam(&
 !
         gamma_lm = gamma_lm / alpha_lm
         call calc_xi(x, x_apriori, jac,ref_tol_obs, ref_tol_calc, Sy, Sa, gamma_lm, x_plus_1)
-        !call calc_xi_2(x, x_apriori, jac,rad_tol_obs, rad_tol_calc, &
-        !     Sy, Sa, gamma_lm, x_plus_1)
         x=x_plus_1
 
     end do 
@@ -190,6 +184,7 @@ subroutine LM_flotsam(&
         us, sca, ref_s, &
         tau_plus_1, i_channel, iband, &
         n_sca, n_pfc, n_aod, n_aero_layers, &
+        .False., &
         !n_layers, &
         ref_tol_calc, jac)
 
@@ -244,14 +239,125 @@ subroutine free_flotsam_profiles(iband, iprof)
 
 end subroutine free_flotsam_profiles
 
+subroutine run_flotsam_daily(ssa_pix, pf_components_pix, &
+    pf_smooth_pix, &
+    uv, us, saa, vaa, sca, ref_s, &
+    aod, AOD_max_steps, i_channel, &
+    n_aero_layers, n_sca, n_aod, n_pfc, &  
+    rho_1, trans_coeff, r_ms)
+
+    Real, Dimension(1:N_AOD_max), Intent(In) :: AOD_max_steps   ! Aerosol parameters
+    Real, dimension(N_Channels, n_aod), intent(in) :: ssa_pix
+    Real, dimension(N_channels, n_sca, n_aod), intent(in) :: pf_smooth_pix
+    Real, dimension(N_channels, n_pfc, n_aod), intent(in) :: pf_components_pix
+    integer, intent(in) :: n_sca, n_pfc, n_aod, n_aero_layers, i_channel
+    !real, intent(in) :: ssa_tilde, phase_tilde, aod_tilde
+    !integer, intent(in) :: n_layers
+    integer(c_int) :: iband_c
+    real, intent(in) :: aod, us, uv, sca, ref_s, saa, vaa
+    !real, intent(in) :: ssa_tilde_val
+    real, Intent(InOut)  :: r_ms, trans_coeff, rho_1
+    real :: rho_tol_0, rho_tol_1, dummy_real, r_ss, ssa_val, pf_interp
+    !real :: r_ss_tilde, rho_1_tilde
+    real :: pf_cmp_pix_contiguous(n_pfc,1)
+    integer :: iprof, iband
+
+    call prep_flotsam(us, uv, saa, vaa, i_channel, iband, iprof)
+
+    ! call 1: get rho_tol_0
+    call execute_flotsam(AOD_max_steps, &
+        ssa_pix, pf_components_pix, &
+        pf_smooth_pix, &
+        us, sca, ref_s, &
+        aod, i_channel, iband, &
+        n_sca, n_pfc, n_aod, n_aero_layers, &
+        .False., &
+        !n_layers, &
+        rho_tol_0, dummy_real)
+
+    !print*, 'RHO TOL 0: ', rho_tol_0
+
+    ! call 2: get rho_tol_1
+    call execute_flotsam(AOD_max_steps, &
+        ssa_pix, pf_components_pix, &
+        pf_smooth_pix, &
+        us, sca, 0., &
+        aod, i_channel, iband, &
+        n_sca, n_pfc, n_aod, n_aero_layers, &
+        .False., &
+        !n_layers, &
+        rho_tol_1, dummy_real)
+
+    !print*, 'RHO TOL 1: ', rho_tol_1
+
+    rho_1 = 1./(4.*(us+uv))*(1.-exp(-aod*(1./us+1./uv)))
+    !print*, 'RHO 1: ', rho_1
+
+    call get_interp_aer_parms(sca, aod, AOD_max_steps, &
+        ssa_pix, pf_smooth_pix, pf_components_pix, &
+        n_sca, n_pfc, n_aod, i_channel, &
+        pf_interp, ssa_val, pf_cmp_pix_contiguous)
+
+    r_ss = ssa_val*pf_interp*rho_1
+    !print*, 'R SS: ', r_ss
+    !rho_1_tilde = 1./(4.*(us+uv))*(1.-exp(-aod_tilde*(1./us+1./uv)))
+    !r_ss_tilde = ssa_tilde*phase_tilde*rho_1_tilde
+    !print*, 'R SS ~: ', r_ss_tilde
+    
+    r_ms = rho_tol_1 - r_ss
+    trans_coeff = (rho_tol_0 - rho_tol_1) / ref_s
+
+    !print*, 'rho 1, tc, r_ms: ', rho_1, trans_coeff, r_ms
+    call free_flotsam_profiles(iband, iprof)
+
+end subroutine run_flotsam_daily
+
+subroutine get_interp_aer_parms(sca, aod, AOD_max_steps, &
+    ssa_pix, pf_smooth_pix, pf_components_pix, &
+    n_sca, n_pfc, n_aod, i_channel, &
+    pf_interp, ssa_val, pf_cmp_pix_contiguous)
+    Real, Dimension(1:N_AOD_max), Intent(In) :: AOD_max_steps   ! Aerosol parameters
+    Real, dimension(N_Channels, n_aod), intent(in) :: ssa_pix
+    Real, dimension(N_channels, n_sca, n_aod), intent(in) :: pf_smooth_pix
+    Real, dimension(N_channels, n_pfc, n_aod), intent(in) :: pf_components_pix
+    real, intent(in) :: sca, aod
+    integer, intent(in) :: n_sca, n_pfc, n_aod, i_channel
+    real, intent(out) :: pf_interp, ssa_val, pf_cmp_pix_contiguous(n_pfc,1)
+    real(FLOTSAM_REAL) :: pf_smoo_pix_contiguous(n_sca,1), sca_c
+    integer :: i_aod    
+
+    sca_c = sca
+    
+    ! retrieving position from AOD steps of dynamic properties
+    i_aod = MINLOC(ABS(AOD_max_steps-aod), DIM=1)
+   
+    pf_cmp_pix_contiguous = reshape(&
+        pf_components_pix(i_channel,:, i_aod),&
+        (/n_pfc,1/))
+    pf_smoo_pix_contiguous = reshape(&
+        pf_smooth_pix(i_channel,:, i_aod),&
+        (/n_sca,1/))
+
+    ! technically I could just use the interpolated phase value as it is 
+    ! calculated for MSA.. maybe in the future
+    pf_interp = flotsam_interp_phase_func(&
+            n_sca, pf_smoo_pix_contiguous, sca_c)
+
+    ssa_val = ssa_pix(i_channel, i_aod)
+
+end subroutine get_interp_aer_parms
 
 subroutine execute_flotsam(AOD_max_steps, ssa_pix, pf_components_pix, &
     pf_smooth_pix, &
     mu_sun, sca, ref_s, &
     aod, i_channel, iband, &
     n_sca, n_pfc, n_aod, n_aero_layers, &
+    do_jac, &
     !n_layers, &
     ref_tol_calc, jac)
+
+    ! Does a single execute of FLOTSAM, or a double execute to compute the Jacobian    
+    ! -------------------------------------------------------------------------
 
     Real, Dimension(1:N_AOD_max), Intent(In) :: AOD_max_steps   ! Aerosol parameters
     Real, dimension(N_Channels, n_aod), intent(in) :: ssa_pix
@@ -262,6 +368,7 @@ subroutine execute_flotsam(AOD_max_steps, ssa_pix, pf_components_pix, &
     integer, intent(in) :: iband
     integer(c_int) :: iband_c
     real, intent(in) :: aod, mu_sun, sca, ref_s
+    logical, intent(in) :: do_jac
     real, intent(out) :: ref_tol_calc, jac
     real :: aod_jac, r_jac_1, r_jac_2, jac_fac
     real(FLOTSAM_REAL) :: sca_c, pf_interp
@@ -291,6 +398,8 @@ subroutine execute_flotsam(AOD_max_steps, ssa_pix, pf_components_pix, &
         pf_smooth_pix(i_channel,:, i_aod),&
         (/n_sca,1/))
 
+    ! technically I could just use the interpolated phase value as it is 
+    ! calculated for MSA.. maybe in the future
     pf_interp = flotsam_interp_phase_func(&
             n_sca, pf_smoo_pix_contiguous, sca_c)
     !print*, 'FLOTSAM INIT PHF: ', pf_interp
@@ -299,7 +408,7 @@ subroutine execute_flotsam(AOD_max_steps, ssa_pix, pf_components_pix, &
     ! if passing only one phase function, the shape does not seem to matter
     ! this is how it is done in ECRAD:
     ! allocate(pf_components(n_pf_components, nlev)) [nlev: number of model levels]
-    ! in our case this should be (n_pfc, 1) then, I thin...?
+    ! in our case this should be (n_pfc, 1) then, I think...?
     !pfc_array(1, :) = pf_cmp_pix_contiguous(:,1)
 
     ref_s_array(1) = ref_s
@@ -307,6 +416,7 @@ subroutine execute_flotsam(AOD_max_steps, ssa_pix, pf_components_pix, &
     ssa_array(1) = ssa_pix(i_channel, i_aod)
     pf_interp_array(1) = pf_interp
 
+    !print*, 'FLOTSAM INPUTS: '
     !print*, iband, n_albedo_components, ref_s_array, aod_array, ssa_array, pf_interp_array, n_layers, loc
     !print*, real(pf_cmp_pix_contiguous, FLOTSAM_REAL)
     radiance = 0.
@@ -334,41 +444,46 @@ subroutine execute_flotsam(AOD_max_steps, ssa_pix, pf_components_pix, &
         !rad_tol_calc = radiance
         r_jac_1 = ref_tol_calc
 
-        if (i_aod .eq. N_AOD_max) then
-            i_aod_jac = i_aod - 1
-            aod_jac = aod - d_aod
-            jac_fac = -1.   
-        else
-            i_aod_jac = i_aod + 1
-            aod_jac = aod + d_aod
-            jac_fac = 1.
-        endif
+        if (do_jac) then
+            if (i_aod .eq. N_AOD_max) then
+                i_aod_jac = i_aod - 1
+                aod_jac = aod - d_aod
+                jac_fac = -1.   
+            else
+                i_aod_jac = i_aod + 1
+                aod_jac = aod + d_aod
+                jac_fac = 1.
+            endif
 
-        ! need to change this later..
-        pf_cmp_pix_contiguous = reshape(&
-            pf_components_pix(i_channel,:, i_aod_jac),&
-            (/n_pfc,1/))
-        pf_smoo_pix_contiguous = reshape(&
-            pf_smooth_pix(i_channel,:, i_aod_jac),&
-            (/n_sca,1/))
+            ! need to change this later..
+            pf_cmp_pix_contiguous = reshape(&
+                pf_components_pix(i_channel,:, i_aod_jac),&
+                (/n_pfc,1/))
+            pf_smoo_pix_contiguous = reshape(&
+                pf_smooth_pix(i_channel,:, i_aod_jac),&
+                (/n_sca,1/))
 
-        pf_interp = flotsam_interp_phase_func(&
-                n_sca, pf_smoo_pix_contiguous, sca_c)
+            pf_interp = flotsam_interp_phase_func(&
+                    n_sca, pf_smoo_pix_contiguous, sca_c)
 
-        aod_array(1) = aod_jac
-        ssa_array(1) = ssa_pix(i_channel, i_aod_jac)
-        pf_interp_array(1) = pf_interp
+            aod_array(1) = aod_jac
+            ssa_array(1) = ssa_pix(i_channel, i_aod_jac)
+            pf_interp_array(1) = pf_interp
 
-        callstat = flotsam_reflectance(iband, n_albedo_components, &
-            ref_s_array, n_layers, loc, aod_array, ssa_array,&
-            pf_interp_array, &
-            pf_cmp_pix_contiguous, &
-            !pfc_array, &
-            radiance)
-        r_jac_2 = radiance * pi_lm / mu_sun
+            callstat = flotsam_reflectance(iband, n_albedo_components, &
+                ref_s_array, n_layers, loc, aod_array, ssa_array,&
+                pf_interp_array, &
+                pf_cmp_pix_contiguous, &
+                !pfc_array, &
+                radiance)
+            r_jac_2 = radiance * pi_lm / mu_sun
 
-        jac = jac_fac * (r_jac_2 - r_jac_1) / d_aod
-        !print*, 'JACO :', rad_jac_1, rad_jac_2, d_aod, jac_fac, jac
+            jac = jac_fac * (r_jac_2 - r_jac_1) / d_aod
+            !print*, 'JACO :', rad_jac_1, rad_jac_2, d_aod, jac_fac, jac
+        else 
+            ! return dummy result for jacobian
+            jac = 0.
+        endif 
 
     endif
 
@@ -420,48 +535,6 @@ subroutine init_flotsam_channel()
     ichan = flotsam_new_channel_vacuum()
 
 end subroutine init_flotsam_channel
-
-
-subroutine calc_xi_2(x,x_apriori,jac,ref_tol_obs,ref_tol_calc,Sy,Sa,gamma_lm, x_plus_1)
-
-    Real, Intent(In) :: x !xi a l'iteration precedente
-    Real, Intent(In) :: x_apriori !x a priori
-    Real, Intent(In) :: jac !valeur de la jacobienne en x (ici de dim 1)
-    Real, Intent(In) :: ref_tol_obs !y dans le schema, la reflectance observee
-    Real, Intent(In) :: ref_tol_calc !la reflectance calculee pour x
-    Real, Intent(In) :: Sy !la variance de l'erreur de mesure (sur ref_tol_obs)
-    Real, Intent(In) :: sa ! la variance de l'apriori
-    Real, Intent(In) :: gamma_lm !la valeur prise par gamma
-    !Real, intent(in) :: AOD_max
-    Real, Intent(Out) :: x_plus_1 !la nouvelle valeur de xi
- 
-    x_plus_1=x_apriori+(1./(jac*(1./Sy)*jac+(1./Sa)+gamma_lm/Sa))*(jac*(1./Sy)* &
-       & ((ref_tol_obs-ref_tol_calc)+jac*(x-x_apriori))+gamma_lm*(1./Sa)*(x-x_apriori))
-
-    ! technically we should stop x_plus_1 from being outside of physical values
-    !if (x_plus_1 .lt. 0.) then
-    !    x_plus_1 = -0.
-    !else if (x_plus_1 .gt. AOD_max)
- 
-    return
- 
-end subroutine calc_xi_2
- 
-subroutine calc_xhi2_2(x,x_apriori,ref_tol_obs,ref_tol_calc,Sa,Sy,xhi2)
- 
-    real, intent(in) :: x !xi à l'iteration precedente
-    real, intent(in) :: x_apriori !x a priori
-    real, intent(in) :: ref_tol_obs !y dans le schema, la reflectance observee
-    real, intent(in) :: ref_tol_calc !la reflectance calculee pour x
-    real, intent(in) :: Sy !la variance de l'erreur de mesure (sur ref_tol_obs)
-    real, intent(in) :: Sa ! la variance de l'apriori
-    real, intent(out) :: xhi2 !la valeur du xhi2 à cette iteration
- 
-    xhi2=((ref_tol_obs-ref_tol_calc)*(1/Sy)*(ref_tol_obs-ref_tol_calc))+(x-x_apriori)*(1/Sa)*(x-x_apriori)
- 
-    return
- 
-end subroutine calc_xhi2_2
 
 ! xi is phase function here
 ! (function was just for testing..)
