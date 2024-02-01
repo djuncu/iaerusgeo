@@ -8,6 +8,18 @@ One of the changes is that python parts of the code are now python3, no longer p
 
 The adaption requires a few changes in usage:
 
+### Python/Conda environment
+in project root directory:
+```bash
+conda create -c conda-forge -n YOUR_ENVNAME --file conda-env.txt
+```
+
+Make sure environment is activated before compilation and before every use.
+
+```bash
+conda activate YOUR_ENVNAME
+```
+
 ### Compilation
 (there should be a cleaner way to do this, but for now it works)
 ```bash
