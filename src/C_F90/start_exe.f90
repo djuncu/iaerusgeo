@@ -1764,7 +1764,7 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                                              ! RTM from Katsev et al. 2010
                                              call calculate_r_ms(&
                                                 ssa_tilde(aod_pos,I), g_tilde(aod_pos,I), &
-                                                tau_0_tilde, albed_b_in_, uv, us, &
+                                                tau_0_tilde, albed_b_in, uv, us, &
                                                 rho_1, trans_coeff, R_MS)                                                 
                                              !print*, 'rho 1, tc, r_ms: ', rho_1, trans_coeff, R_MS
 
@@ -1789,14 +1789,14 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                                              ! if ref_s is 0 or below, use TOL reflectance
                                              ! instead (double check if still necessary)
                                              if (ref_s .le. 0) then                                                 
-                                                ref_s = (reflectance(X, Y, I, N)+ Offset_Ref(N)) / Scale_Ref(N)
+                                                ref_s = albed_b_in
                                              end if                  
 
                                              ! Flotsam does not like AOD=0
                                              ! need to investigate what effect the 
                                              ! choice of value has
                                              if (tau_0 .eq. 0.0) then 
-                                                tau_daily = 0.005
+                                                tau_daily = 0.001
                                              else 
                                                 tau_daily = tau_0
                                              end if
@@ -2092,7 +2092,7 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                                           ! if ref_s is 0 or below, use TOL reflectance
                                           ! instead
                                           if (ref_s_ .le. 0) then                                                 
-                                             ref_s_ = (reflectance(X, Y, I, N)+ Offset_Ref(N)) / Scale_Ref(N)
+                                             ref_s_ = albed_b_in_
                                           end if     
 
                                           call run_flotsam_daily(&
