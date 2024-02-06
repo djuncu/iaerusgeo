@@ -39,7 +39,8 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
    Real :: pf_smoo_pix_contiguous(n_sca,1), pf_cmp_pix_contiguous(n_pfc,1)
    Real :: ssa_pix(N_channels, n_aod), pf_interp !, sca
    integer :: i_aero_1, i_aero_2, i_aero_3, iprof, iband
-   real :: t1, t2, tmp_real, k_daily(0:MM), tau_daily
+   real :: t1, t2, tmp_real, dummy_real, k_daily(0:MM), tau_daily
+   real, dimension(N_scenes) :: r_ms_arr, rho1_arr, tcoeff_arr
    
    External reportLog, getStopStatus, stopping
 
@@ -458,6 +459,19 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
          print *, 'X, Y, I, uv, us, xi, albed_b_in, ref_s, ref_tol, ref_tol_out, tau_0'
       EndIf
 
+      debug_flag = .true.  
+      if (debug_flag) then
+         open(21, file='debug.dat', status='replace', action='write')
+         open(22, file='debug_r_ms_1.dat', status='replace', action='write')
+         open(23, file='debug_r_ms_2.dat', status='replace', action='write')
+         open(24, file='debug_rho1_1.dat', status='replace', action='write')
+         open(25, file='debug_rho1_2.dat', status='replace', action='write')
+         open(26, file='debug_tcoeff_1.dat', status='replace', action='write')
+         open(27, file='debug_tcoeff_2.dat', status='replace', action='write')
+         !open(23, file='debug_tcoeff.dat', status='replace', action='write')
+         !open(24, file='debug_rho1.dat', status='replace', action='write')
+      end if
+
       !print*, 'Lines: ', Lines
       !print*, 'MSGpixX: ', MSGpixX
       Do Y = 1, Lines
@@ -847,9 +861,9 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                      call init_flotsam_channel()                     
                   endif
 
-                  debug_flag = .false.
+                  !debug_flag = .true. !.false.
 !                  if ((I .eq. 1) .and. (Y .eq. 5)) debug_flag = .true.
-                  if ((I .eq. 1) .and. (Y .eq. 5)) debug_flag = .false.
+                  !if ((I .eq. 1) .and. (Y .eq. 5)) debug_flag = .false.
 
                   ! check for correctly processed slots
                   processed = BTest(lwcs_mask(X, Y, I, :), BIT_PROC) .and. reflectance(X, Y, I, :) .ne. Missing_Ref
@@ -1751,6 +1765,12 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
 
                                     ! fill matrix A and vector b
                                     NN = 0
+                                    if (debug_flag) then
+                                       r_ms_arr = -999.
+                                       rho1_arr = -999.
+                                       tcoeff_arr = -999.
+                                    end if
+
                                     Do N = 1, N_scenes                                       
                                        If (valid(N)) Then
                                           NN = NN+1
@@ -1808,7 +1828,7 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                                                 uv, us, phi_sol(N), phi_sat(N), scat_ang(N), &
                                                 ref_s, &   
                                                 tau_daily, AOD_max_steps, &
-                                                !debug_flag, &                                           
+                                                !debug_flag, &                                   
                                                 I, 1, n_sca, n_aod, n_pfc, & 
                                                 rho_1, trans_coeff, R_MS)
 
@@ -1820,7 +1840,13 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                                              !call cpu_time(t2)                                             
                                              !print*, 'CPU TIME: ', t2-t1, ' s'
 
-                                          end if 
+                                          end if
+
+                                          if (debug_flag) then
+                                             r_ms_arr(N) = R_MS
+                                             rho1_arr(N) = rho_1
+                                             tcoeff_arr(N) = trans_coeff
+                                          end if
 
                                           if (A(NN, 3) .eq. 0) then
                                              A(NN, 0:MM) = 0.0000001
@@ -1972,6 +1998,20 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                                     cpt_tau = cpt_tau+1
                                  EndDo
 
+                                 if (debug_flag) then
+                                    write(22, fmt='(2(2X, I5))', advance='no') X, Y
+                                    write(24, fmt='(2(2X, I5))', advance='no') X, Y
+                                    write(26, fmt='(2(2X, I5))', advance='no') X, Y
+                                    do N=1,N_scenes
+                                       write(22, fmt='(200(2X, ES16.8))', advance='no') r_ms_arr(N)
+                                       write(24, fmt='(200(2X, ES16.8))', advance='no') rho1_arr(N)
+                                       write(26, fmt='(200(2X, ES16.8))', advance='no') tcoeff_arr(N)
+                                    end do
+                                    write(22, *) ''
+                                    write(24, *) ''
+                                    write(26, *) ''
+                                 end if
+
                                  ! constraint for processing over ocean: k(0) is between 0 and k0_ocean_max and k(1) is 1
                                  If (ocean_flag) then
                                     if (k(0) .lt. 0.0) k(0) = 0.0
@@ -2056,6 +2096,12 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
 
                                  ! fill matrix A_ and vector b_
                                  NN = 0
+                                 if (debug_flag) then
+                                    r_ms_arr = -999.
+                                    rho1_arr = -999.
+                                    tcoeff_arr = -999.
+                                 end if
+
                                  Do N = 1, N_scenes
                                     If (valid(N)) Then
                                        NN = NN+1
@@ -2110,8 +2156,29 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                                                 & - R_MS) / trans_coeff / sigrefl_(N)
 
                                        end if
+
+                                          if (debug_flag) then
+                                             r_ms_arr(N) = R_MS
+                                             rho1_arr(N) = rho_1
+                                             tcoeff_arr(N) = trans_coeff
+                                          end if
+
                                     End If
                                  End Do
+
+                                 if (debug_flag) then
+                                    write(23, fmt='(2(2X, I5))', advance='no') X, Y
+                                    write(25, fmt='(2(2X, I5))', advance='no') X, Y
+                                    write(27, fmt='(2(2X, I5))', advance='no') X, Y
+                                    do N=1,N_scenes
+                                       write(23, fmt='(200(2X, ES16.8))', advance='no') r_ms_arr(N)
+                                       write(25, fmt='(200(2X, ES16.8))', advance='no') rho1_arr(N)
+                                       write(27, fmt='(200(2X, ES16.8))', advance='no') tcoeff_arr(N)
+                                    end do
+                                    write(23, *) ''
+                                    write(25, *) ''
+                                    write(27, *) ''
+                                 end if
 
                                  ! generate matrix ATA_
                                  AT_ = Transpose( A_ )
@@ -2198,17 +2265,49 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                                     print *, '     N,     refl(N),     ref_tol,     diff.,     ref_s,     xi,     poids'
                                     Do N = 1, N_scenes
                                        If (valid(N)) Then
-                                          ref_s = dot_product(brdfmodel(theta_sat(N), theta_sol(N), phi_sat(N), phi_sol(N), phi_del(N), &
-                                             & wspeed(N), wdir(N), I, model, ocean_flag, .False.), k(0:2))
-                                          P_tilde = phaseFunc_value(scat_ang(N),I)
-                                          P_tilde = P_tilde/(1.-eta(aod_pos,I)) ! truncation
-                                          call calculate_ref_tol(ref_s, P_tilde(aod_pos), ssa_tilde(aod_pos,I), g_tilde(aod_pos,I), &
-                                             & tau_0_tilde, albed_b_in, Cos(theta_sat(N)), Cos(theta_sol(N)), ref_tol)
+                                          ref_s = dot_product(brdfmodel(theta_sat(N), &
+                                             theta_sol(N), phi_sat(N), phi_sol(N), phi_del(N), &
+                                             wspeed(N), wdir(N), I, model, ocean_flag, .False.),&
+                                             k(0:2))
+                                          
+                                          if (rtm_switch .eq. 1) then
+
+                                             P_tilde = phaseFunc_value(scat_ang(N),I)
+                                             P_tilde = P_tilde/(1.-eta(aod_pos,I)) ! truncation
+                                             call calculate_ref_tol(ref_s, P_tilde(aod_pos), &
+                                                ssa_tilde(aod_pos,I), g_tilde(aod_pos,I), &
+                                                tau_0_tilde, albed_b_in, Cos(theta_sat(N)), &
+                                                Cos(theta_sol(N)), ref_tol)
+
+                                          else if (rtm_switch .eq. 2) then
+
+                                            us = cos(theta_sol(N))
+                                            uv = cos(theta_sat(N))
+
+                                            call prep_flotsam(us, uv, phi_sol(N), phi_sat(N), &
+                                                    I, iband, iprof)
+                                            call execute_flotsam(AOD_max_steps, &
+                                                ssa_pix, pf_components_pix, &
+                                                pf_smooth_pix, &
+                                                us, scat_ang(N), ref_s, &
+                                                k(3), I, iband, &
+                                                n_sca, n_pfc, n_aod, 1, &
+                                                .False., &
+                                                !n_layers, &
+                                                ref_tol, dummy_real)
+                                            call free_flotsam_profiles(iband, iprof)
+
+                                          end if
+
                                           fit_error = fit_error+abs(refl(N)-ref_tol)
                                           counter = counter+1
                                           print *, N, refl(N), ref_tol, refl(N)-ref_tol, ref_s, scat_ang(N), 1.0/sigrefl(N)
+                                          ! output data into a file 
+                                          write(21,*) N, refl(N), ref_tol, refl(N)-ref_tol, ref_s, scat_ang(N), 1.0/sigrefl(N)
+                                           
                                        End If
                                     End Do
+                                    write(21,*) '#'
                                     print *, 'Average absolute fit error is: ', fit_error/counter
                                     print *, '******************************'
                                     print *, '(k_ case): fitting error for each observation is:'
@@ -2217,17 +2316,46 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                                     print *, '     N,     refl(N),     ref_tol,     diff.,     ref_s_,     xi,     poids'
                                     Do N = 1, N_scenes
                                        If (valid(N)) Then
-                                          ref_s_ = dot_product(brdfmodel(theta_sat(N), theta_sol(N), phi_sat(N), phi_sol(N), phi_del(N), &
+                                          ref_s_ = dot_product(brdfmodel(theta_sat(N), &
+                                             theta_sol(N), phi_sat(N), phi_sol(N),&
+                                             phi_del(N), &
                                              & wspeed(N), wdir(N), I, model, ocean_flag, .True.), k_(0:2))
-                                          P_tilde = phaseFunc_value(scat_ang(N),I)
-                                          P_tilde = P_tilde/(1.-eta(aod_pos,I)) ! truncation
-                                          call calculate_ref_tol(ref_s_, P_tilde(aod_pos), ssa_tilde(aod_pos,I), g_tilde(aod_pos,I), &
-                                             & tau_0_tilde, albed_b_in_, Cos(theta_sat(N)), Cos(theta_sol(N)), ref_tol)
+                                          if (rtm_switch .eq. 1) then
+                                             P_tilde = phaseFunc_value(scat_ang(N),I)
+                                             P_tilde = P_tilde/(1.-eta(aod_pos,I)) ! truncation
+                                             call calculate_ref_tol(ref_s_, P_tilde(aod_pos),&
+                                                ssa_tilde(aod_pos,I), g_tilde(aod_pos,I), &
+                                                & tau_0_tilde, albed_b_in_, Cos(theta_sat(N)),&
+                                                Cos(theta_sol(N)), ref_tol)
+                                          else if (rtm_switch .eq. 2) then
+
+                                            us = cos(theta_sol(N))
+                                            uv = cos(theta_sat(N))
+
+                                            call prep_flotsam(us, uv, phi_sol(N), phi_sat(N), &
+                                                    I, iband, iprof)
+                                            call execute_flotsam(AOD_max_steps, &
+                                                ssa_pix, pf_components_pix, &
+                                                pf_smooth_pix, &
+                                                us, scat_ang(N), ref_s_, &
+                                                k(3), I, iband, &
+                                                n_sca, n_pfc, n_aod, 1, &
+                                                .False., &
+                                                !n_layers, &
+                                                ref_tol, dummy_real)
+                                            call free_flotsam_profiles(iband, iprof)
+
+                                          end if
+
                                           fit_error = fit_error+abs(refl(N)-ref_tol)
                                           counter = counter+1
                                           print *, N, refl(N), ref_tol, refl(N)-ref_tol, ref_s_, scat_ang(N), 1.0/sigrefl_(N)
+                                          ! output data into a file 
+                                          write(21,*) N, refl(N), ref_tol, refl(N)-ref_tol, ref_s_, scat_ang(N), 1.0/sigrefl(N)
+
                                        End If
                                     End Do
+                                    write(21,*) '##'
                                     print *, 'Average absolute fit error is: ', fit_error/counter
                                     print *, '******************************'
                                     print *, '***END DAILY DEBUG***'
@@ -2417,6 +2545,10 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
             End If
          End Do ! loop over X
       End Do ! loop over Y
+
+      if (debug_flag) then
+         close(21)
+      end if
 
       If (writeInversion_flag) Then
          print * , '*_*_*_*_*_*_*_*_*_*'
