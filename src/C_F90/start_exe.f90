@@ -1828,14 +1828,26 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                                                 uv, us, phi_sol(N), phi_sat(N), scat_ang(N), &
                                                 ref_s, &   
                                                 tau_daily, AOD_max_steps, &
+                                                !phFunc(aod_pos), &
+                                                ! trying with tilde PF
+                                                ! NOTE should use ssa tilde too....
+                                                phFunc(aod_pos) / (1-eta(aod_pos,I)), & 
+                                                ssa_tilde(aod_pos,I), tau_0_tilde, &
                                                 !debug_flag, &                                   
                                                 I, 1, n_sca, n_aod, n_pfc, & 
                                                 rho_1, trans_coeff, R_MS)
 
+                                             ! TEST: 
+                                             !phFunc(aod_pos) = pf_smooth_pix(&
+                                             !   I, MINLOC(ABS(scatt_angs-scat_ang(N)), DIM=1), aod_pos)
+
                                              A(NN, 0:MM) = brdfmodel_aerosol(theta_sat(N), theta_sol(N), phi_sat(N), phi_sol(N), phi_del(N), &
-                                                & wspeed(N), wdir(N), I, model, ocean_flag, tau_0, g(aod_pos,I), ssa(aod_pos,I), &
-                                                & trans_coeff, phFunc(aod_pos), .False.)/sigrefl(N)
+                                                & wspeed(N), wdir(N), I, model, ocean_flag, tau_0_tilde, g(aod_pos,I), ssa_tilde(aod_pos,I), &
+                                                & trans_coeff, phFunc(aod_pos)/(1-eta(aod_pos,I)), .False.)/sigrefl(N)
                                              b(NN) = (refl(N)-R_MS)/trans_coeff/sigrefl(N)
+
+                                             !print*, 'MSA PHF: ', tau_0, tau_daily, aod_pos, scat_ang(N), phFunc(aod_pos)
+                                             !print*, 'MSA SSA', ssa(aod_pos,I)
 
                                              !call cpu_time(t2)                                             
                                              !print*, 'CPU TIME: ', t2-t1, ' s'
@@ -2146,13 +2158,15 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                                              uv, us, phi_sol(N), phi_sat(N), scat_ang(N), &
                                              ref_s_, &                                            
                                              tau_0, AOD_max_steps,&
+                                             phFunc(aod_pos) / (1-eta(aod_pos,I)), & 
+                                             ssa_tilde(aod_pos,I), tau_0_tilde, &
                                              !debug_flag, &                                           
                                              I, 1, n_sca, n_aod, n_pfc, & 
                                              rho_1, trans_coeff, R_MS)
 
                                           A_(NN, 0:MM-1) = brdfmodel(theta_sat(N), theta_sol(N), phi_sat(N), phi_sol(N), phi_del(N), &
                                              & wspeed(N), wdir(N), I, model, ocean_flag, .True.) / sigrefl_(N)
-                                          b_(NN) = (refl(N) - ssa(aod_pos,I)*phFunc(aod_pos)*rho_1 &
+                                          b_(NN) = (refl(N) - ssa_tilde(aod_pos,I)*phFunc(aod_pos)/(1.-eta(aod_pos,I))*rho_1 &
                                                 & - R_MS) / trans_coeff / sigrefl_(N)
 
                                        end if

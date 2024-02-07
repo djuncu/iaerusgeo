@@ -242,7 +242,9 @@ end subroutine free_flotsam_profiles
 subroutine run_flotsam_daily(ssa_pix, pf_components_pix, &
     pf_smooth_pix, &
     uv, us, saa, vaa, sca, ref_s, &
-    aod, AOD_max_steps, i_channel, &
+    aod, AOD_max_steps, ph_val_msa, &
+    ssa_tilde, aod_tilde, &
+    i_channel, &
     n_aero_layers, n_sca, n_aod, n_pfc, &  
     rho_1, trans_coeff, r_ms)
 
@@ -251,10 +253,10 @@ subroutine run_flotsam_daily(ssa_pix, pf_components_pix, &
     Real, dimension(N_channels, n_sca, n_aod), intent(in) :: pf_smooth_pix
     Real, dimension(N_channels, n_pfc, n_aod), intent(in) :: pf_components_pix
     integer, intent(in) :: n_sca, n_pfc, n_aod, n_aero_layers, i_channel
-    !real, intent(in) :: ssa_tilde, phase_tilde, aod_tilde
+    real, intent(in) :: ssa_tilde, aod_tilde !, phase_tilde
     !integer, intent(in) :: n_layers
     integer(c_int) :: iband_c
-    real, intent(in) :: aod, us, uv, sca, ref_s, saa, vaa
+    real, intent(in) :: aod, us, uv, sca, ref_s, saa, vaa, ph_val_msa
     !real, intent(in) :: ssa_tilde_val
     real, Intent(InOut)  :: r_ms, trans_coeff, rho_1
     real :: rho_tol_0, rho_tol_1, dummy_real, r_ss, ssa_val, pf_interp
@@ -290,7 +292,8 @@ subroutine run_flotsam_daily(ssa_pix, pf_components_pix, &
 
     !print*, 'RHO TOL 1: ', rho_tol_1
 
-    rho_1 = 1./(4.*(us+uv))*(1.-exp(-aod*(1./us+1./uv)))
+    !rho_1 = 1./(4.*(us+uv))*(1.-exp(-aod*(1./us+1./uv)))
+    rho_1 = 1./(4.*(us+uv))*(1.-exp(-aod_tilde*(1./us+1./uv)))
     !print*, 'RHO 1: ', rho_1
 
     call get_interp_aer_parms(sca, aod, AOD_max_steps, &
@@ -298,7 +301,10 @@ subroutine run_flotsam_daily(ssa_pix, pf_components_pix, &
         n_sca, n_pfc, n_aod, i_channel, &
         pf_interp, ssa_val, pf_cmp_pix_contiguous)
 
-    r_ss = ssa_val*pf_interp*rho_1
+    !r_ss = ssa_val*pf_interp*rho_1
+    !print*, 'FLOTSAM SSA: ', ssa_val
+    !r_ss = ssa_val*ph_val_msa*rho_1
+    r_ss = ssa_tilde*ph_val_msa*rho_1
     !print*, 'R SS: ', r_ss
     !rho_1_tilde = 1./(4.*(us+uv))*(1.-exp(-aod_tilde*(1./us+1./uv)))
     !r_ss_tilde = ssa_tilde*phase_tilde*rho_1_tilde
@@ -402,7 +408,7 @@ subroutine execute_flotsam(AOD_max_steps, ssa_pix, pf_components_pix, &
     ! calculated for MSA.. maybe in the future
     pf_interp = flotsam_interp_phase_func(&
             n_sca, pf_smoo_pix_contiguous, sca_c)
-    !print*, 'FLOTSAM INIT PHF: ', pf_interp
+    !print*, 'FLOTSAM INIT PHF: ', aod, i_aod, sca_c, pf_interp
 
     ! wait... what is it now....? need to double check 
     ! if passing only one phase function, the shape does not seem to matter
