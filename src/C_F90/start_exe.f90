@@ -2009,6 +2009,18 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
 
                                     cpt_tau = cpt_tau+1
                                  EndDo
+                                 
+                                 ! constraint for processing over ocean: k(0) is between 0 and k0_ocean_max and k(1) is 1
+                                 If (ocean_flag) then
+                                    if (k(0) .lt. 0.0) k(0) = 0.0
+                                    if (k(0) .gt. k0_ocean_max) k(0) = k0_ocean_max
+                                    k(1) = 1.0
+                                    k(2) = 0.0
+                                 EndIF
+
+                                 goto 302
+301                              print *, '***singular*301**'
+302                              continue
 
                                  if (debug_flag) then
                                     write(22, fmt='(2(2X, I5))', advance='no') X, Y
@@ -2024,17 +2036,6 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                                     write(26, *) ''
                                  end if
 
-                                 ! constraint for processing over ocean: k(0) is between 0 and k0_ocean_max and k(1) is 1
-                                 If (ocean_flag) then
-                                    if (k(0) .lt. 0.0) k(0) = 0.0
-                                    if (k(0) .gt. k0_ocean_max) k(0) = k0_ocean_max
-                                    k(1) = 1.0
-                                    k(2) = 0.0
-                                 EndIF
-
-                                 goto 302
-301                              print *, '***singular*301**'
-302                              continue
 
                               Endif ! end of no procesingover snow pixels
 
@@ -2135,18 +2136,13 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                                           b_(NN) = (refl(N) - ssa_tilde(aod_pos,I)*phFunc(aod_pos)/(1.-eta(aod_pos,I))*rho_1 &
                                                 & - R_MS) / trans_coeff / sigrefl_(N)
 
-                                       else if (rtm_switch .eq. 2) then 
-                                          if (cpt_tau .eq. 1) then  
-                                             k_daily = k_in_      
-                                          else 
-                                             k_daily(0:2) = k_                                                
-                                          end if
+                                       else if (rtm_switch .eq. 2) then                             
                                           ref_s_ = dot_product(&
                                              brdfmodel(theta_sat(N), theta_sol(N),&
                                                 phi_sat(N), phi_sol(N), phi_del(N),&
                                                 wspeed(N), wdir(N), I, model, & 
                                                 ocean_flag, .False.),&
-                                             k_daily(0:2))
+                                             k(0:2))
                                           ! if ref_s is 0 or below, use TOL reflectance
                                           ! instead
                                           if (ref_s_ .le. 0) then                                                 
@@ -2157,7 +2153,7 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                                              ssa_pix, pf_components_pix, pf_smooth_pix, & 
                                              uv, us, phi_sol(N), phi_sat(N), scat_ang(N), &
                                              ref_s_, &                                            
-                                             tau_0, AOD_max_steps,&
+                                             k(3), AOD_max_steps,&
                                              phFunc(aod_pos) / (1-eta(aod_pos,I)), & 
                                              ssa_tilde(aod_pos,I), tau_0_tilde, &
                                              !debug_flag, &                                           
@@ -2171,11 +2167,11 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
 
                                        end if
 
-                                          if (debug_flag) then
-                                             r_ms_arr(N) = R_MS
-                                             rho1_arr(N) = rho_1
-                                             tcoeff_arr(N) = trans_coeff
-                                          end if
+                                       if (debug_flag) then
+                                          r_ms_arr(N) = R_MS
+                                          rho1_arr(N) = rho_1
+                                          tcoeff_arr(N) = trans_coeff
+                                       end if
 
                                     End If
                                  End Do

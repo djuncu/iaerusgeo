@@ -296,10 +296,10 @@ subroutine run_flotsam_daily(ssa_pix, pf_components_pix, &
     rho_1 = 1./(4.*(us+uv))*(1.-exp(-aod_tilde*(1./us+1./uv)))
     !print*, 'RHO 1: ', rho_1
 
-    call get_interp_aer_parms(sca, aod, AOD_max_steps, &
-        ssa_pix, pf_smooth_pix, pf_components_pix, &
-        n_sca, n_pfc, n_aod, i_channel, &
-        pf_interp, ssa_val, pf_cmp_pix_contiguous)
+    !call get_interp_aer_parms(sca, aod, AOD_max_steps, &
+    !    ssa_pix, pf_smooth_pix, pf_components_pix, &
+    !    n_sca, n_pfc, n_aod, i_channel, &
+    !    pf_interp, ssa_val, pf_cmp_pix_contiguous)
 
     !r_ss = ssa_val*pf_interp*rho_1
     !print*, 'FLOTSAM SSA: ', ssa_val
