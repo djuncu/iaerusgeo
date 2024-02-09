@@ -2142,8 +2142,8 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                                                 phi_sat(N), phi_sol(N), phi_del(N),&
                                                 wspeed(N), wdir(N), I, model, & 
                                                 ocean_flag, .False.),&
-                                             k(0:2))
-                                          ! if ref_s is 0 or below, use TOL reflectance
+                                             k_in_(0:2))
+                                          ! if ref_s is 0 or below, use albed_b_in_
                                           ! instead
                                           if (ref_s_ .le. 0) then                                                 
                                              ref_s_ = albed_b_in_
