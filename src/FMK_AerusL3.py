@@ -525,6 +525,8 @@ def AerusL3(cfg):
     else:
         rtm_switch = 1
 
+    # there was a reason why I load the FLOTSAM LUT for both RTM types...
+    # ..was it debugging? Double check if still necessary
     if rtm_switch in [1,2]:
         #flotsam_lut_fn = '/cnrm/vegeo/juncud/NO_SAVE/iAERUS-GEO/flotsam_lut_all_channels.h5'
         flotsam_lut_fn = path.join(cfg['ANC_DIR'], FLT_LUT_NAM)
@@ -542,14 +544,19 @@ def AerusL3(cfg):
             aod_values = f['dimensions']['aod_values'][:]
             aerosol_types = f['dimensions']['aerosol_types'][:]
             channels = f['dimensions']['channels'][:]
+        
+        # 'fd' for finite difference; 'ad' for automatic differentation (flotsam function)
+        flotsam_jacobian_type = 'ad'
 
     # GO! Launch F90 scientific software
     if cfg['VERBOSE']: print("Launch Aerosol and Albedo retrieval (blocks of %d rows)" % py_ifc.linesblock)
     if cfg['M_A_P'] < 2:
-        if rtm_switch == 1:
-            status = start_exe(pf_raw, pf_smooth, pf_components, ssa, ang, aerosol_types, rtm_switch)
-        elif rtm_switch == 2:
-            status = start_exe(pf_raw, pf_smooth, pf_components, ssa, ang, aerosol_types, rtm_switch)
+
+        status = start_exe(
+            pf_raw, pf_smooth, pf_components, ssa, ang, aerosol_types,
+            rtm_switch, flotsam_jacobian_type
+        )
+        
         if cfg['VERBOSE']: print('\n  Retrieval completed')
 
     # Write outputs

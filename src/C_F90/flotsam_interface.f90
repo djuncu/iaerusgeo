@@ -24,12 +24,13 @@ module flotsam_interface
 
 subroutine LM_flotsam(&
     Sa, ssa_pix, uv,us, &
-    ! including flotsam preparation for testing
     saa, vaa, sca, &
     refl, refl_out, ref_s, tau_ap, tau0_out,&
     jacoAOD, AOD_max_steps,debug_flag, &
     pf_smooth_pix, pf_components_pix, &
-    !iband, iprof, &
+     ! iband, iprof, &
+    jac_type, &
+    refl_call_counter, &
     i_channel, &
     n_aero_layers, n_sca, n_aod, n_pfc) !sa, tau_ap)
 
@@ -48,7 +49,9 @@ subroutine LM_flotsam(&
     real, intent(in) :: tau_ap ! tau_ap is tau_force in start_exe
     real, intent(in) :: Sa, uv, us, refl,  ref_s
     Logical, Intent(In) :: debug_flag
+    character(len=2), intent(in) :: jac_type ! 'fd' (finite differences) or 'ad' automatic differentiation
     real, intent(out) :: refl_out, tau0_out, jacoAOD
+    integer, intent(inout) :: refl_call_counter
     ! 2nd dim should be n_pf instead of 1...?
     real :: tau_apriori
     !Real :: Sy ! Matrices de covariance (ici ce sont des reels en fait)
@@ -56,11 +59,11 @@ subroutine LM_flotsam(&
     !Real :: gamma_lm
     real :: gamma_lm, Sy
     !real, parameter :: alpha_lm = 2.
-    real :: ref_tol_obs, ref_tol_calc!, rad_tol_obs, rad_tol_calc
+    real :: ref_tol_obs, ref_tol_calc, rad_tol_obs, rad_tol_calc
     Real :: x_plus_1, xhi2, xhi2plus1
     Real :: jac, x, x_apriori
     Integer :: iter1, iter2
-    Real :: tau_plus_1
+    Real :: tau_plus_1    
     !Real :: channel
 
     interface
@@ -91,6 +94,7 @@ subroutine LM_flotsam(&
 
     gamma_lm = 1.
     Sy = 0.0001 
+    !jac_type = 'fd'
 
     !real(FLOTSAM_REAL), parameter :: pi_flotsam=4.D0*ATAN(1.D0)
     call prep_flotsam(us, uv, saa, vaa, i_channel, iband, iprof)
@@ -98,8 +102,8 @@ subroutine LM_flotsam(&
     ! What is AOD_max_steps exactly?
     ! -> seems to be just the range of AOD values.. see aod_parameters.f90
 
-    ! can define them in module scope, if I turn this into a module
-    ref_tol_obs = refl
+    ref_tol_obs = refl    
+    rad_tol_obs = refl * us / pi_lm
     
     !d=0.01
     tau_apriori = tau_ap
@@ -111,19 +115,20 @@ subroutine LM_flotsam(&
         us, sca, ref_s, &
         tau_apriori, i_channel, iband, &
         n_sca, n_pfc, n_aod, n_aero_layers, &
-        .True., &
+        .True., jac_type, &
         !n_layers, &
-        ref_tol_calc, jac)
+        ref_tol_calc, rad_tol_calc, jac)
+    refl_call_counter = refl_call_counter + 2
 
     !print*, 'REF TOL CALC / RAD TOL CA ', ref_tol_calc, rad_tol_calc
     !print*, 'INIT FLOTSAM REFL / TAU: ', ref_tol_calc, tau_apriori
 
-    call calc_xhi2(x, x_apriori, ref_tol_obs, ref_tol_calc, Sa, Sy, xhi2)
+    call calc_xhi2(x, x_apriori, rad_tol_obs, rad_tol_calc, Sa, Sy, xhi2)
     IF (debug_flag) print*,"Initialisation de xhi2 =",xhi2
 
     !-----------------------  Levenberg - Marquardt  -------------------------
     ! --> Calcul de xi_plus_1
-    call calc_xi(x, x_apriori, jac, ref_tol_obs, ref_tol_calc, Sy, Sa, gamma_lm, x_plus_1)
+    call calc_xi(x, x_apriori, jac, rad_tol_obs, rad_tol_calc, Sy, Sa, gamma_lm, x_plus_1)
     x=x_plus_1
     IF (debug_flag) print*,"Initialisation de x_plus_1 =",x_plus_1 
 
@@ -137,19 +142,20 @@ subroutine LM_flotsam(&
             us, sca, ref_s, &
             tau_plus_1, i_channel, iband, &
             n_sca, n_pfc, n_aod, n_aero_layers, &
-            .True., &
+            .True., jac_type, &
             !n_layers, &
-            ref_tol_calc, jac)
+            ref_tol_calc, rad_tol_calc, jac)
+        refl_call_counter = refl_call_counter + 2
         
         !print*, iter1, 'FLOTSAM OBS / REFL / TAU / JAC: ', ref_tol_obs, ref_tol_calc, tau_plus_1, jac
-        call calc_xhi2(x_plus_1, x_apriori, ref_tol_obs, ref_tol_calc, Sa, Sy, xhi2plus1)
+        call calc_xhi2(x_plus_1, x_apriori, rad_tol_obs, rad_tol_calc, Sa, Sy, xhi2plus1)
         
         iter2=0
         !print*, 'OUTER GAMMA / ALPHA: ', gamma_lm, alpha_lm
         do while(iter2 .LT. max_iter2 .and. xhi2plus1 .GE. xhi2)  ! .GE. = >=
         !do while(iter2 .LT. max_iter2)    
             iter2=iter2+1 
-            call calc_xi(x, x_apriori, jac,ref_tol_obs, ref_tol_calc, &
+            call calc_xi(x, x_apriori, jac,rad_tol_obs, rad_tol_calc, &
                 Sy, Sa, gamma_lm, x_plus_1)
             x=x_plus_1
             tau_plus_1 = x_plus_1
@@ -158,12 +164,13 @@ subroutine LM_flotsam(&
                 us, sca, ref_s, &
                 tau_plus_1, i_channel, iband,&
                 n_sca, n_pfc, n_aod, n_aero_layers, &
-                .True., &
+                .True., jac_type, &
                 !n_layers, &
-                ref_tol_calc, jac)
+                ref_tol_calc, rad_tol_calc, jac)
                 !print*, iter1, iter2, ' INNER FLOTSAM REFL / TAU: ', ref_tol_calc, tau_plus_1
+            refl_call_counter = refl_call_counter + 2
 
-            call calc_xhi2(x_plus_1, x_apriori, ref_tol_obs, ref_tol_calc, Sa, Sy, xhi2plus1)
+            call calc_xhi2(x_plus_1, x_apriori, rad_tol_obs, rad_tol_calc, Sa, Sy, xhi2plus1)
         end do
 
         iter1=iter1+1
@@ -171,7 +178,7 @@ subroutine LM_flotsam(&
 !      IF (debug_flag) print*,"xhi2=",xhi2
 !
         gamma_lm = gamma_lm / alpha_lm
-        call calc_xi(x, x_apriori, jac,ref_tol_obs, ref_tol_calc, Sy, Sa, gamma_lm, x_plus_1)
+        call calc_xi(x, x_apriori, jac, rad_tol_obs, rad_tol_calc, Sy, Sa, gamma_lm, x_plus_1)
         x=x_plus_1
 
     end do 
@@ -184,9 +191,10 @@ subroutine LM_flotsam(&
         us, sca, ref_s, &
         tau_plus_1, i_channel, iband, &
         n_sca, n_pfc, n_aod, n_aero_layers, &
-        .False., &
+        .False.,  'fd', &
         !n_layers, &
-        ref_tol_calc, jac)
+        ref_tol_calc, rad_tol_calc, jac)
+    refl_call_counter = refl_call_counter + 1
 
     !print*, 'LM DONE'
 
@@ -259,7 +267,7 @@ subroutine run_flotsam_daily(ssa_pix, pf_components_pix, &
     real, intent(in) :: aod, us, uv, sca, ref_s, saa, vaa, ph_val_msa
     !real, intent(in) :: ssa_tilde_val
     real, Intent(InOut)  :: r_ms, trans_coeff, rho_1
-    real :: rho_tol_0, rho_tol_1, dummy_real, r_ss, ssa_val, pf_interp
+    real :: rho_tol_0, rho_tol_1, dummy_real_1, dummy_real_2, r_ss, ssa_val, pf_interp
     !real :: r_ss_tilde, rho_1_tilde
     real :: pf_cmp_pix_contiguous(n_pfc,1)
     integer :: iprof, iband
@@ -273,9 +281,9 @@ subroutine run_flotsam_daily(ssa_pix, pf_components_pix, &
         us, sca, ref_s, &
         aod, i_channel, iband, &
         n_sca, n_pfc, n_aod, n_aero_layers, &
-        .False., &
+        .False., 'fd',&
         !n_layers, &
-        rho_tol_0, dummy_real)
+        rho_tol_0, dummy_real_1, dummy_real_2)
 
     !print*, 'RHO TOL 0: ', rho_tol_0
 
@@ -286,9 +294,9 @@ subroutine run_flotsam_daily(ssa_pix, pf_components_pix, &
         us, sca, 0., &
         aod, i_channel, iband, &
         n_sca, n_pfc, n_aod, n_aero_layers, &
-        .False., &
+        .False., 'fd',&
         !n_layers, &
-        rho_tol_1, dummy_real)
+        rho_tol_1, dummy_real_1, dummy_real_2)
 
     !print*, 'RHO TOL 1: ', rho_tol_1
 
@@ -358,9 +366,9 @@ subroutine execute_flotsam(AOD_max_steps, ssa_pix, pf_components_pix, &
     mu_sun, sca, ref_s, &
     aod, i_channel, iband, &
     n_sca, n_pfc, n_aod, n_aero_layers, &
-    do_jac, &
+    do_jac, jac_type, &
     !n_layers, &
-    ref_tol_calc, jac)
+    ref_tol_calc, rad_tol_calc, jac)
 
     ! Does a single execute of FLOTSAM, or a double execute to compute the Jacobian    
     ! -------------------------------------------------------------------------
@@ -375,13 +383,15 @@ subroutine execute_flotsam(AOD_max_steps, ssa_pix, pf_components_pix, &
     integer(c_int) :: iband_c
     real, intent(in) :: aod, mu_sun, sca, ref_s
     logical, intent(in) :: do_jac
-    real, intent(out) :: ref_tol_calc, jac
+    character(len=2), intent(in) :: jac_type
+    real, intent(out) :: ref_tol_calc, rad_tol_calc, jac
     real :: aod_jac, r_jac_1, r_jac_2, jac_fac
     real(FLOTSAM_REAL) :: sca_c, pf_interp
     Real(FLOTSAM_REAL) :: pf_smoo_pix_contiguous(n_sca,1), pf_cmp_pix_contiguous(n_pfc,1)
     real(FLOTSAM_REAL), dimension(n_aero_layers) :: pf_interp_array, aod_array, ssa_array
     real(FLOTSAM_REAL), dimension(n_aero_layers) :: ref_s_array
-    real(FLOTSAM_REAL) :: radiance, d_albedo, d_ssa, d_pf, d_pfc, d_od
+    !real(FLOTSAM_REAL) :: radiance, d_albedo, d_ssa, d_pf, d_pfc, d_od
+    real(FLOTSAM_REAL) :: radiance, d_od
     !integer(c_int) :: ichan !iprof
     integer :: i_aod, callstat, i_aod_jac
 
@@ -425,17 +435,26 @@ subroutine execute_flotsam(AOD_max_steps, ssa_pix, pf_components_pix, &
     !print*, 'FLOTSAM INPUTS: '
     !print*, iband, n_albedo_components, ref_s_array, aod_array, ssa_array, pf_interp_array, n_layers, loc
     !print*, real(pf_cmp_pix_contiguous, FLOTSAM_REAL)
-    radiance = 0.
-    if (.false.) then 
-        ! i don't think we can use flotsam jacobian
-        ! if we want to have dynamic aerosol properties...
-        callstat = flotsam_reflectance_jacobian(iband, n_albedo_components, &
+    radiance = 0.    
+    if (jac_type == 'ad') then 
+        ! jacobian calculated by FLOTSAM using automatic differentiation           
+        ! note that it is d_radiance/d_aod (not reflectance)
+        callstat = flotsam_reflectance_jacobian_od(iband, n_albedo_components, &
             ref_s_array, n_layers, loc, aod_array, ssa_array,&
             pf_interp_array, &
             pf_cmp_pix_contiguous, &
             !pfc_array, &
-            radiance, d_albedo, d_od, d_ssa, d_pf, d_pfc)
-    else
+            radiance, d_od)
+            !radiance, d_albedo, d_od, d_ssa, d_pf, d_pfc)
+        !print*, 'JAC analytical: ', d_od
+        !d_od = d_od * pi_lm / mu_sun
+        !print*, 'JAC analytical: ', d_od
+        rad_tol_calc = radiance
+        jac = d_od
+    !end if
+        
+    else if (jac_type == 'fd') then
+    !else
         !print*, 'FLOTSAM INPUTS: ', i_aod, sca_flotsam, pf_interp, ssa_array(1), ref_s, aod
         callstat = flotsam_reflectance(iband, n_albedo_components, &
             ref_s_array, n_layers, loc, aod_array, ssa_array,&
@@ -444,19 +463,21 @@ subroutine execute_flotsam(AOD_max_steps, ssa_pix, pf_components_pix, &
             !pfc_array, &
             radiance)
 
-
         ref_tol_calc = radiance * pi_lm / mu_sun
+        rad_tol_calc = radiance
         !print*, 'INIT FLOTSAM REFL / TAU: ', ref_tol_calc, aod
-        !rad_tol_calc = radiance
-        r_jac_1 = ref_tol_calc
+        !r_jac_1 = radiance
+        r_jac_1 = rad_tol_calc
 
         if (do_jac) then
             if (i_aod .eq. N_AOD_max) then
-                i_aod_jac = i_aod - 1
+                i_aod_jac = i_aod - 1 
+                !i_aod_jac = i_aod ! JUST FOR TEST
                 aod_jac = aod - d_aod
                 jac_fac = -1.   
             else
                 i_aod_jac = i_aod + 1
+                !i_aod_jac = i_aod ! JUST FOR TEST
                 aod_jac = aod + d_aod
                 jac_fac = 1.
             endif
@@ -482,9 +503,11 @@ subroutine execute_flotsam(AOD_max_steps, ssa_pix, pf_components_pix, &
                 pf_cmp_pix_contiguous, &
                 !pfc_array, &
                 radiance)
-            r_jac_2 = radiance * pi_lm / mu_sun
+            r_jac_2 = radiance! * pi_lm / mu_sun
+            !r_jac_2 = radiance
 
             jac = jac_fac * (r_jac_2 - r_jac_1) / d_aod
+            print*, 'JAC numerical: ', jac
             !print*, 'JACO :', rad_jac_1, rad_jac_2, d_aod, jac_fac, jac
         else 
             ! return dummy result for jacobian

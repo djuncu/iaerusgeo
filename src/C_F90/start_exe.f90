@@ -1,6 +1,7 @@
 Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
-        scatt_angs, aerosol_types_in_lut, rtm_switch, n_chnls_lut, n_aero, n_pfc,&
-        & n_sca, n_aod, ProcessingStatus_p)
+        scatt_angs, aerosol_types_in_lut, rtm_switch, flotsam_jac_type, &
+        n_chnls_lut, n_aero, n_pfc,&
+        n_sca, n_aod, ProcessingStatus_p)
    Use nr, Only: svdvar
    Use py_ifc
    Use algoconf
@@ -27,6 +28,7 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
    Real(8), intent(in) :: scatt_angs(n_sca)
    Real, intent(in) :: aerosol_types_in_lut(n_aero)
    integer, intent(in) :: rtm_switch
+   character(len=2), intent(in) :: flotsam_jac_type
    Integer, Intent(Out) :: ProcessingStatus_p
    real :: xi_test, sza, vza
    Real, Dimension(1:N_AOD_max) :: phf_test
@@ -39,8 +41,9 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
    Real :: pf_smoo_pix_contiguous(n_sca,1), pf_cmp_pix_contiguous(n_pfc,1)
    Real :: ssa_pix(N_channels, n_aod), pf_interp !, sca
    integer :: i_aero_1, i_aero_2, i_aero_3, iprof, iband
-   real :: t1, t2, tmp_real, dummy_real, k_daily(0:MM), tau_daily
+   real :: t1, t2, tmp_real, dummy_real_1, dummy_real_2, k_daily(0:MM), tau_daily
    real, dimension(N_scenes) :: r_ms_arr, rho1_arr, tcoeff_arr
+   integer :: refl_call_counter
    
    External reportLog, getStopStatus, stopping
 
@@ -468,6 +471,7 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
          open(25, file='debug_rho1_2.dat', status='replace', action='write')
          open(26, file='debug_tcoeff_1.dat', status='replace', action='write')
          open(27, file='debug_tcoeff_2.dat', status='replace', action='write')
+         open(31, file='refl_calls.dat', status='replace', action='write')
          !open(23, file='debug_tcoeff.dat', status='replace', action='write')
          !open(24, file='debug_rho1.dat', status='replace', action='write')
       end if
@@ -498,6 +502,7 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
 
          Do X = 1, MSGpixX
             !print*, 'PROCESSING PIXEL ', X, Y
+            refl_call_counter = 0
 
             ! Are coast pixels processed?
             if (.not. COAST_OK .and. coast_pix(X, Y) .eq. 1) Then
@@ -1518,6 +1523,8 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                                             tau_force, tau_0, jacoAOD, AOD_max_steps,&
                                             debug_flag, &
                                             pf_smooth_pix, pf_components_pix, &
+                                            flotsam_jac_type, &
+                                            refl_call_counter, &
                                             I, 1, n_sca, n_aod, n_pfc)
                                           !print*, 'TAU FLOTSAM: ', tau_0, jacoAOD
                                        else if (rtm_switch .eq. 1) then
@@ -1836,6 +1843,7 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                                                 !debug_flag, &                                   
                                                 I, 1, n_sca, n_aod, n_pfc, & 
                                                 rho_1, trans_coeff, R_MS)
+                                             refl_call_counter = refl_call_counter + 2
 
                                              ! TEST: 
                                              !phFunc(aod_pos) = pf_smooth_pix(&
@@ -2152,13 +2160,14 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                                           call run_flotsam_daily(&
                                              ssa_pix, pf_components_pix, pf_smooth_pix, & 
                                              uv, us, phi_sol(N), phi_sat(N), scat_ang(N), &
-                                             ref_s_, &                                            
+                                             ref_s_, & 
                                              k(3), AOD_max_steps,&
                                              phFunc(aod_pos) / (1-eta(aod_pos,I)), & 
                                              ssa_tilde(aod_pos,I), tau_0_tilde, &
-                                             !debug_flag, &                                           
+                                             !debug_flag, &
                                              I, 1, n_sca, n_aod, n_pfc, & 
                                              rho_1, trans_coeff, R_MS)
+                                          refl_call_counter = refl_call_counter + 2
 
                                           A_(NN, 0:MM-1) = brdfmodel(theta_sat(N), theta_sol(N), phi_sat(N), phi_sol(N), phi_del(N), &
                                              & wspeed(N), wdir(N), I, model, ocean_flag, .True.) / sigrefl_(N)
@@ -2302,9 +2311,9 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                                                 us, scat_ang(N), ref_s, &
                                                 k(3), I, iband, &
                                                 n_sca, n_pfc, n_aod, 1, &
-                                                .False., &
+                                                .False., 'fd', &
                                                 !n_layers, &
-                                                ref_tol, dummy_real)
+                                                ref_tol, dummy_real_1, dummy_real_2)
                                             call free_flotsam_profiles(iband, iprof)
 
                                           end if
@@ -2350,9 +2359,9 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                                                 us, scat_ang(N), ref_s_, &
                                                 k(3), I, iband, &
                                                 n_sca, n_pfc, n_aod, 1, &
-                                                .False., &
+                                                .False., 'fd', &
                                                 !n_layers, &
-                                                ref_tol, dummy_real)
+                                                ref_tol, dummy_real_1, dummy_real_2)
                                             call free_flotsam_profiles(iband, iprof)
 
                                           end if
@@ -2553,11 +2562,21 @@ Subroutine start_exe(pf_raw_lut, pf_smooth_lut, pf_components_lut, ssa_lut, &
                End If
 
             End If
+
+            print*, 'Reflectance calls for pixel: ', refl_call_counter
+            write(31, fmt='(3(2X, I5))') X, Y, refl_call_counter
          End Do ! loop over X
       End Do ! loop over Y
 
       if (debug_flag) then
          close(21)
+         close(22)
+         close(23)
+         close(24)
+         close(25)
+         close(26)
+         close(27)
+         close(31)
       end if
 
       If (writeInversion_flag) Then
